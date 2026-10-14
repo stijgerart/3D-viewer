@@ -102,6 +102,10 @@
     <button id="mirror">⇋ Spiegel</button>
     <button id="resetRot">Reset</button>
   </div>
+  <div class="row">
+    <button id="decBtn">✂ Verklein</button>
+    <button id="saveBtn">💾 Opslaan</button>
+  </div>
 </div>
 <div id="panel">
   <div class="phead">
@@ -135,6 +139,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { unzipSync, strFromU8 } from 'three/addons/libs/fflate.module.js';
 import { USDZExporter } from 'three/addons/exporters/USDZExporter.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------- Rhino 3DM: bibliotheek zit ingebouwd in deze pagina ----------
 let rhinoPromise = null;
@@ -497,9 +503,142 @@ function loadFile(file) {
   else reader.readAsArrayBuffer(file);
 }
 
+// ---------- Verkleinen (decimeren) ----------
+const AUTO_MAX_TRIS = 80000;
+let currentName = '';
+let simplifierP = null;
+function getSimplifier() {
+  if (!simplifierP) simplifierP = import('https://cdn.jsdelivr.net/npm/meshoptimizer@0.21.0/meshopt_simplifier.module.js')
+    .then(m => m.MeshoptSimplifier.ready.then(() => m.MeshoptSimplifier))
+    .catch(() => null);
+  return simplifierP;
+}
+function countTris(obj) {
+  let n = 0;
+  obj.traverse(c => { if (c.isMesh) { const g = c.geometry; n += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+  return Math.round(n);
+}
+function plainFloat(a) {
+  if (!a.isInterleavedBufferAttribute && !a.normalized && a.array instanceof Float32Array) return a;
+  const f = new Float32Array(a.count * a.itemSize);
+  for (let i = 0; i < a.count; i++) { const v = [a.getX(i), a.getY(i), a.getZ(i), a.getW(i)]; for (let j = 0; j < a.itemSize; j++) f[i * a.itemSize + j] = v[j]; }
+  return new THREE.BufferAttribute(f, a.itemSize);
+}
+function simplifyGeometry(geo, targetTris, simp) {
+  let g = geo.clone();
+  for (const k of Object.keys(g.attributes)) {
+    if (!['position', 'uv', 'color'].includes(k)) g.deleteAttribute(k);
+    else g.setAttribute(k, plainFloat(g.attributes[k]));
+  }
+  g.morphAttributes = {};
+  g.clearGroups();
+  g.computeBoundingBox();
+  const diag = g.boundingBox.getSize(new THREE.Vector3()).length() || 1;
+  if (!g.index) g = mergeVertices(g, diag * 1e-6);
+  const idx = new Uint32Array(g.index.array);
+  const target = Math.min(idx.length, Math.max(3, Math.floor(targetTris) * 3));
+  let out;
+  if (simp) {
+    out = simp.simplify(idx, g.attributes.position.array, 3, target, 1, [])[0];
+    g.setIndex(new THREE.BufferAttribute(out, 1));
+  } else {
+    // Reserve: punten samenvoegen (verliest textuur)
+    g = decimateTo(g.attributes.position.array, idx, targetTris);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+async function decimateObject(obj, targetTotal) {
+  const total = countTris(obj);
+  if (total <= targetTotal) return total;
+  const simp = await getSimplifier();
+  const meshes = [];
+  obj.traverse(c => { if (c.isMesh) meshes.push(c); });
+  for (const m of meshes) {
+    const g = m.geometry;
+    const n = (g.index ? g.index.count : g.attributes.position.count) / 3;
+    const ng = simplifyGeometry(g, Math.max(4, n * targetTotal / total), simp);
+    if (m.isSkinnedMesh) continue;
+    m.geometry = ng;
+    g.dispose();
+    if (Array.isArray(m.material)) m.material = m.material[0];
+    if (!ng.attributes.uv && m.material && m.material.map) { m.material = m.material.clone(); m.material.map = null; }
+    await new Promise(res => setTimeout(res, 0));
+  }
+  return total;
+}
+
 function setModel(obj, name) {
+  const total = countTris(obj);
+  if (total <= AUTO_MAX_TRIS) return setModelNow(obj, name);
+  busy.style.display = 'flex';
+  busy.textContent = 'Groot model (' + total.toLocaleString('nl-NL') + ' driehoeken) verkleinen…';
+  setTimeout(() => {
+    decimateObject(obj, AUTO_MAX_TRIS)
+      .then(orig => { obj.userData.note = ' (verkleind van ' + orig.toLocaleString('nl-NL') + ')'; setModelNow(obj, name); })
+      .catch(e => fail('Verkleinen mislukt: ' + (e.message || e)))
+      .finally(() => { busy.textContent = 'Laden…'; });
+  }, 30);
+}
+
+// Opnieuw opbouwen na handmatig verkleinen
+function stripHelpers(obj) {
+  obj.traverse(c => {
+    if (!c.isMesh) return;
+    for (const k of ['edges', 'wire']) { const h = c.userData[k]; if (h) { c.remove(h); h.geometry.dispose(); } delete c.userData[k]; }
+    if (c.userData.wireCache) { Object.values(c.userData.wireCache).forEach(g => g.dispose()); delete c.userData.wireCache; }
+    if (c.userData.orig) c.material = c.userData.orig;
+  });
+  obj.scale.set(1, 1, 1);
+  obj.position.set(0, 0, 0);
+}
+
+document.getElementById('decBtn').onclick = () => {
+  if (!model) return fail('Open eerst een model.');
+  const now = countTris(model);
+  const ans = prompt('Nu: ' + now.toLocaleString('nl-NL') + ' driehoeken.\nHoeveel driehoeken wil je overhouden?', String(Math.min(AUTO_MAX_TRIS, Math.round(now / 2))));
+  if (!ans) return;
+  const target = parseInt(ans.replace(/\D/g, ''), 10);
+  if (!target || target >= now) return;
+  busy.style.display = 'flex';
+  busy.textContent = 'Verkleinen…';
+  setTimeout(async () => {
+    try {
+      const m = model;
+      orient.remove(m);
+      stripHelpers(m);
+      await decimateObject(m, target);
+      model = null;
+      m.userData.note = ' (verkleind van ' + now.toLocaleString('nl-NL') + ')';
+      setModelNow(m, currentName);
+    } catch (e) { fail('Verkleinen mislukt: ' + (e.message || e)); }
+    busy.textContent = 'Laden…';
+  }, 30);
+};
+
+document.getElementById('saveBtn').onclick = () => {
+  if (!model) return fail('Open eerst een model.');
+  busy.style.display = 'flex';
+  busy.textContent = 'Opslaan…';
+  const oldMode = mode;
+  mode = 'solid'; applyMode();
+  const sc = model.scale.clone(), pos = model.position.clone();
+  model.scale.set(1, 1, 1); model.position.set(0, 0, 0);
+  const restore = () => { model.scale.copy(sc); model.position.copy(pos); mode = oldMode; applyMode(); busy.style.display = 'none'; busy.textContent = 'Laden…'; };
+  new GLTFExporter().parse(model, glb => {
+    restore();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
+    a.download = (currentName || 'model').replace(/\.[^.]+$/, '') + '-' + countTris(model) + '.glb';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  }, err => { restore(); fail('Opslaan mislukt: ' + (err.message || err)); }, { binary: true, onlyVisible: true });
+};
+
+function setModelNow(obj, name) {
+  currentName = name;
   shownDensity = -1;
-  if (model) {
+  if (model && model !== obj) {
     orient.remove(model);
     model.traverse(c => { if (c.geometry) c.geometry.dispose(); });
   }

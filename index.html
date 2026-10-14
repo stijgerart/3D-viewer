@@ -59,6 +59,9 @@
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
   #arLink img{width:1px;height:1px;opacity:0;position:absolute}
+  #savePanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
+  .saveBig{background:#4a7cff;border-color:#4a7cff;color:#fff;font-weight:700;font-size:19px;min-height:60px}
+  #saveInfo{font-size:15px;opacity:.8;line-height:1.4}
 </style>
 </head>
 <body>
@@ -76,6 +79,13 @@
   <label class="arRow">Hoogte in meters <input id="arHeight" type="number" value="1" min="0.05" step="0.1" inputmode="decimal"></label>
   <div id="arInfo"></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
+</div>
+<div id="savePanel">
+  <div class="phead"><strong>Opslaan als</strong><button id="saveClose">Sluiten</button></div>
+  <button class="saveBig" data-fmt="obj">OBJ — voor SculptAid</button>
+  <button class="saveBig" data-fmt="glb">GLB — met textures</button>
+  <button class="saveBig" id="saveReady" style="display:none;background:#2fa36b;border-color:#2fa36b">📤 Bewaar bestand</button>
+  <div id="saveInfo">Daarna kies je zelf waar het bestand komt: Bestanden, Dropbox, Google Drive…</div>
 </div>
 <video id="camVideo" playsinline muted autoplay></video>
 <div id="bottom">
@@ -140,6 +150,7 @@ import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { unzipSync, strFromU8 } from 'three/addons/libs/fflate.module.js';
 import { USDZExporter } from 'three/addons/exporters/USDZExporter.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------- Rhino 3DM: bibliotheek zit ingebouwd in deze pagina ----------
@@ -616,24 +627,74 @@ document.getElementById('decBtn').onclick = () => {
   }, 30);
 };
 
+const savePanel = document.getElementById('savePanel');
+const saveReady = document.getElementById('saveReady');
+let readyFile = null;
 document.getElementById('saveBtn').onclick = () => {
   if (!model) return fail('Open eerst een model.');
+  readyFile = null;
+  saveReady.style.display = 'none';
+  document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.style.display = 'block');
+  savePanel.style.display = 'flex';
+};
+// Bestand klaar: tweede tik opent het deelvenster (iPhone vereist een tik)
+function showReady(blob, name) {
+  readyFile = { blob, name };
+  document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.style.display = 'none');
+  saveReady.textContent = '📤 Bewaar ' + name;
+  saveReady.style.display = 'block';
+  savePanel.style.display = 'flex';
+}
+saveReady.onclick = () => { if (readyFile) offerFile(readyFile.blob, readyFile.name); };
+document.getElementById('saveClose').onclick = () => { savePanel.style.display = 'none'; };
+
+// Bestand aanbieden: via het deelvenster (kies zelf de plek), anders gewoon downloaden
+async function offerFile(blob, filename) {
+  const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: filename }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
+
+document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.onclick = () => {
+  const fmt = b.dataset.fmt;
+  savePanel.style.display = 'none';
   busy.style.display = 'flex';
   busy.textContent = 'Opslaan…';
   const oldMode = mode;
   mode = 'solid'; applyMode();
+  // Hulplijnen tijdelijk weg, originele maat (geen schermschaal)
+  model.traverse(c => { if (c.isMesh) { c.userData._helpers = [c.userData.edges, c.userData.wire].filter(Boolean); c.userData._helpers.forEach(h => c.remove(h)); } });
   const sc = model.scale.clone(), pos = model.position.clone();
   model.scale.set(1, 1, 1); model.position.set(0, 0, 0);
-  const restore = () => { model.scale.copy(sc); model.position.copy(pos); mode = oldMode; applyMode(); busy.style.display = 'none'; busy.textContent = 'Laden…'; };
-  new GLTFExporter().parse(model, glb => {
-    restore();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([glb], { type: 'model/gltf-binary' }));
-    a.download = (currentName || 'model').replace(/\.[^.]+$/, '') + '-' + countTris(model) + '.glb';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
-  }, err => { restore(); fail('Opslaan mislukt: ' + (err.message || err)); }, { binary: true, onlyVisible: true });
-};
+  model.updateMatrixWorld(true);
+  const restore = () => {
+    model.scale.copy(sc); model.position.copy(pos);
+    model.traverse(c => { if (c.isMesh && c.userData._helpers) { c.userData._helpers.forEach(h => c.add(h)); delete c.userData._helpers; } });
+    mode = oldMode; applyMode();
+    busy.style.display = 'none'; busy.textContent = 'Laden…';
+  };
+  const base = (currentName || 'model').replace(/\.[^.]+$/, '') + '-' + countTris(model);
+  setTimeout(() => {
+    if (fmt === 'obj') {
+      let txt;
+      try { txt = new OBJExporter().parse(model); } catch (e) { restore(); return fail('Opslaan mislukt: ' + e.message); }
+      restore();
+      showReady(new Blob([txt], { type: 'text/plain' }), base + '.obj');
+    } else {
+      new GLTFExporter().parse(model, glb => {
+        restore();
+        showReady(new Blob([glb], { type: 'model/gltf-binary' }), base + '.glb');
+      }, err => { restore(); fail('Opslaan mislukt: ' + (err.message || err)); }, { binary: true, onlyVisible: true });
+    }
+  }, 30);
+});
 
 function setModelNow(obj, name) {
   currentName = name;

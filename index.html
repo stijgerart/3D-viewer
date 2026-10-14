@@ -59,6 +59,11 @@
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
   #arLink img{width:1px;height:1px;opacity:0;position:absolute}
+  #decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
+  #decInfo{font-size:17px;font-weight:600}
+  .decRow{display:flex;gap:10px}
+  #decNum{flex:1;min-width:0;font-size:20px;padding:12px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#fff}
+  .decRow .saveBig{flex:none;padding:0 18px}
   #savePanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   .saveBig{background:#4a7cff;border-color:#4a7cff;color:#fff;font-weight:700;font-size:19px;min-height:60px}
   #saveInfo{font-size:15px;opacity:.8;line-height:1.4}
@@ -79,6 +84,12 @@
   <label class="arRow">Hoogte in meters <input id="arHeight" type="number" value="1" min="0.05" step="0.1" inputmode="decimal"></label>
   <div id="arInfo"></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
+</div>
+<div id="decPanel">
+  <div class="phead"><strong>Verkleinen</strong><button id="decClose">Sluiten</button></div>
+  <div id="decInfo"></div>
+  <button class="saveBig" id="decHalf">½ Halveren</button>
+  <div class="decRow"><input id="decNum" type="text" inputmode="numeric" placeholder="aantal driehoeken"><button class="saveBig" id="decApply">Toepassen</button></div>
 </div>
 <div id="savePanel">
   <div class="phead"><strong>Opslaan als</strong><button id="saveClose">Sluiten</button></div>
@@ -535,6 +546,36 @@ function plainFloat(a) {
   for (let i = 0; i < a.count; i++) { const v = [a.getX(i), a.getY(i), a.getZ(i), a.getW(i)]; for (let j = 0; j < a.itemSize; j++) f[i * a.itemSize + j] = v[j]; }
   return new THREE.BufferAttribute(f, a.itemSize);
 }
+// Snel punten samenvoegen op positie (veel sneller dan mergeVertices op de telefoon)
+function weldFast(g, eps) {
+  const pos = g.attributes.position, n = pos.count, p = pos.array;
+  let size = 1; while (size < n * 2) size <<= 1;
+  const table = new Int32Array(size).fill(-1), mask = size - 1;
+  const remap = new Uint32Array(n), keep = [];
+  const inv = 1 / eps;
+  for (let i = 0; i < n; i++) {
+    const x = Math.round(p[i * 3] * inv), y = Math.round(p[i * 3 + 1] * inv), z = Math.round(p[i * 3 + 2] * inv);
+    let h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) & mask;
+    for (;;) {
+      const j = table[h];
+      if (j < 0) { table[h] = keep.length; remap[i] = keep.length; keep.push(i); break; }
+      const k = keep[j];
+      if (Math.round(p[k * 3] * inv) === x && Math.round(p[k * 3 + 1] * inv) === y && Math.round(p[k * 3 + 2] * inv) === z) { remap[i] = j; break; }
+      h = (h + 1) & mask;
+    }
+  }
+  const out = new THREE.BufferGeometry();
+  for (const [name, a] of Object.entries(g.attributes)) {
+    const s = a.itemSize, src = a.array, dst = new Float32Array(keep.length * s);
+    for (let v = 0; v < keep.length; v++) for (let c = 0; c < s; c++) dst[v * s + c] = src[keep[v] * s + c];
+    out.setAttribute(name, new THREE.BufferAttribute(dst, s));
+  }
+  const idx = g.index ? g.index.array : null;
+  const m = idx ? idx.length : n, I = new Uint32Array(m);
+  for (let i = 0; i < m; i++) I[i] = remap[idx ? idx[i] : i];
+  out.setIndex(new THREE.BufferAttribute(I, 1));
+  return out;
+}
 function simplifyGeometry(geo, targetTris, simp) {
   let g = geo.clone();
   for (const k of Object.keys(g.attributes)) {
@@ -545,7 +586,7 @@ function simplifyGeometry(geo, targetTris, simp) {
   g.clearGroups();
   g.computeBoundingBox();
   const diag = g.boundingBox.getSize(new THREE.Vector3()).length() || 1;
-  if (!g.index) g = mergeVertices(g, diag * 1e-6);
+  if (!g.index) g = weldFast(g, diag * 1e-6);
   const idx = new Uint32Array(g.index.array);
   const target = Math.min(idx.length, Math.max(3, Math.floor(targetTris) * 3));
   let out;
@@ -586,7 +627,7 @@ function setModel(obj, name) {
   busy.textContent = 'Groot model (' + total.toLocaleString('nl-NL') + ' driehoeken) verkleinen…';
   setTimeout(() => {
     decimateObject(obj, AUTO_MAX_TRIS)
-      .then(orig => { obj.userData.note = ' (verkleind van ' + orig.toLocaleString('nl-NL') + ')'; setModelNow(obj, name); })
+      .then(orig => { obj.userData.origTris = orig; obj.userData.note = ' (verkleind van ' + orig.toLocaleString('nl-NL') + ')'; setModelNow(obj, name); })
       .catch(e => fail('Verkleinen mislukt: ' + (e.message || e)))
       .finally(() => { busy.textContent = 'Laden…'; });
   }, 30);
@@ -604,28 +645,47 @@ function stripHelpers(obj) {
   obj.position.set(0, 0, 0);
 }
 
+const decPanel = document.getElementById('decPanel');
+const decNum = document.getElementById('decNum');
+function nf0(n) { return Math.round(n).toLocaleString('nl-NL'); }
 document.getElementById('decBtn').onclick = () => {
   if (!model) return fail('Open eerst een model.');
   const now = countTris(model);
-  const ans = prompt('Nu: ' + now.toLocaleString('nl-NL') + ' driehoeken.\nHoeveel driehoeken wil je overhouden?', String(Math.min(AUTO_MAX_TRIS, Math.round(now / 2))));
-  if (!ans) return;
-  const target = parseInt(ans.replace(/\D/g, ''), 10);
-  if (!target || target >= now) return;
+  document.getElementById('decInfo').textContent = 'Nu: ' + nf0(now) + ' driehoeken';
+  document.getElementById('decHalf').textContent = '½ Halveren → ' + nf0(now / 2);
+  decNum.value = '';
+  decPanel.style.display = 'flex';
+};
+document.getElementById('decClose').onclick = () => { decPanel.style.display = 'none'; };
+document.getElementById('decHalf').onclick = () => runDecimate(Math.round(countTris(model) / 2));
+document.getElementById('decApply').onclick = () => {
+  const t = parseInt(decNum.value.replace(/\D/g, ''), 10);
+  if (!t) return fail('Vul een aantal in, bijvoorbeeld 40000.');
+  if (t >= countTris(model)) return fail('Dat is niet minder dan het huidige aantal.');
+  runDecimate(t);
+};
+function runDecimate(target) {
+  if (!model) return;
+  decNum.blur();
+  decPanel.style.display = 'none';
+  const now = countTris(model);
   busy.style.display = 'flex';
-  busy.textContent = 'Verkleinen…';
+  busy.textContent = 'Verkleinen naar ' + nf0(target) + '…';
   setTimeout(async () => {
     try {
       const m = model;
+      const orig = m.userData.origTris || now;
       orient.remove(m);
       stripHelpers(m);
       await decimateObject(m, target);
       model = null;
-      m.userData.note = ' (verkleind van ' + now.toLocaleString('nl-NL') + ')';
+      m.userData.origTris = orig;
+      m.userData.note = ' (verkleind van ' + nf0(orig) + ')';
       setModelNow(m, currentName);
     } catch (e) { fail('Verkleinen mislukt: ' + (e.message || e)); }
     busy.textContent = 'Laden…';
   }, 30);
-};
+}
 
 const savePanel = document.getElementById('savePanel');
 const saveReady = document.getElementById('saveReady');

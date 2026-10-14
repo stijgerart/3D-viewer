@@ -55,6 +55,9 @@
   #arPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #arPanel .arRow{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:16px;font-weight:600}
   #arHeight{width:110px;font-size:18px;padding:10px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#fff;text-align:center}
+  #arPresets button{flex:1;font-size:18px;font-weight:700;min-height:52px}
+  #arPresets button.on{background:#4a7cff;border-color:#4a7cff}
+  #arPanel #arHeight{flex:1;width:auto;min-width:0;font-size:20px;text-align:left}
   #arInfo{font-size:15px;line-height:1.4;opacity:.85}
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
@@ -81,9 +84,14 @@
 <div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven</div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
-  <label class="arRow">Hoogte in meters <input id="arHeight" type="number" value="1" min="0.05" step="0.1" inputmode="decimal"></label>
-  <div id="arInfo"></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
+  <a id="arSafari" class="saveBig" style="display:none;text-align:center;text-decoration:none;line-height:60px">🧭 Open in Safari voor AR</a>
+  <div class="arRow">Hoogte in meters</div>
+  <div class="decRow" id="arPresets">
+    <button data-h="0.5">0,5</button><button data-h="1">1</button><button data-h="1.5">1,5</button><button data-h="2">2</button><button data-h="3">3</button>
+  </div>
+  <div class="decRow"><input id="arHeight" type="text" inputmode="decimal" value="1"><button class="saveBig" id="arOk">OK</button></div>
+  <div id="arInfo"></div>
 </div>
 <div id="decPanel">
   <div class="phead"><strong>Verkleinen</strong><button id="decClose">Sluiten</button></div>
@@ -1117,18 +1125,42 @@ async function prepareAR() {
   }
 }
 
+// Chrome op iPhone kan Apple AR niet openen vanuit de pagina; Safari wel
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isChromeIOS = /CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+const arSafari = document.getElementById('arSafari');
+function markPreset() {
+  const v = String(arHeight.value).replace(',', '.');
+  document.querySelectorAll('#arPresets button').forEach(b => b.classList.toggle('on', b.dataset.h === String(parseFloat(v))));
+}
 arBtn.onclick = () => {
   arPanel.style.display = 'flex';
+  markPreset();
+  if (isIOS && isChromeIOS) {
+    arLink.style.display = 'none';
+    arSafari.style.display = 'block';
+    arSafari.href = 'x-safari-' + location.href;
+    arInfo.textContent = 'In Chrome op de iPhone werkt AR niet. Tik op de knop hierboven om de viewer in Safari te openen, laad daar je model en tik op AR.';
+    return;
+  }
+  arSafari.style.display = 'none';
   if (!canQuickLook) {
     arLink.style.display = 'none';
-    arInfo.textContent = 'AR werkt alleen op iPhone of iPad, in Safari of Chrome. In het Claude-venster werkt het niet.';
+    arInfo.textContent = 'AR werkt alleen op een iPhone of iPad in Safari. In het Claude-venster werkt het niet.';
     return;
   }
   arLink.style.display = 'block';
   prepareAR();
 };
 document.getElementById('arClose').onclick = () => { arPanel.style.display = 'none'; arToken++; };
-arHeight.onchange = () => { if (arPanel.style.display === 'flex' && canQuickLook) prepareAR(); };
+function heightChanged() {
+  arHeight.blur();
+  markPreset();
+  if (arPanel.style.display === 'flex' && canQuickLook && !(isIOS && isChromeIOS)) prepareAR();
+}
+document.querySelectorAll('#arPresets button').forEach(b => b.onclick = () => { arHeight.value = b.dataset.h.replace('.', ','); heightChanged(); });
+document.getElementById('arOk').onclick = heightChanged;
+arHeight.onkeydown = e => { if (e.key === 'Enter') heightChanged(); };
 
 // ---------- Camera als achtergrond ----------
 const camBtn = document.getElementById('camBtn');

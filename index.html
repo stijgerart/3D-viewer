@@ -81,7 +81,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 21:10</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 21:20</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -402,7 +402,15 @@ const info = document.getElementById('info');
 const busy = document.getElementById('busy');
 const empty = document.getElementById('empty');
 
-function fail(msg) { busy.style.display = 'none'; alert(msg); }
+function fail(msg) { busy.style.display = 'none'; trace('klaar'); alert(msg); }
+
+// ---------- Stappen bijhouden: als de telefoon de pagina afsluit, zien we waar het misging ----------
+function trace(step) { try { localStorage.setItem('viewerStep', step); } catch (e) {} }
+(() => {
+  let last = null;
+  try { last = localStorage.getItem('viewerStep'); localStorage.removeItem('viewerStep'); } catch (e) {}
+  if (last && last !== 'klaar') setTimeout(() => alert('De vorige keer is de app vastgelopen tijdens:\n\n' + last + '\n\nHet model was waarschijnlijk te zwaar voor het geheugen van de telefoon.'), 500);
+})();
 
 // ---------- ZIP openen ----------
 const MODEL_EXTS = ['glb', 'gltf', 'fbx', 'obj', '3dm', 'stl'];
@@ -420,12 +428,13 @@ function loadZip(file) {
     // Grootste model kiezen
     models.sort((a, b) => b[1].length - a[1].length);
     const [mName, mData] = models[0];
+    trace('ZIP uitpakken: ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)');
     const ext = mName.split('.').pop().toLowerCase();
     const base = n => n.split('/').pop().toLowerCase();
     // Bijbehorende bestanden (textures, .mtl, .bin) als tijdelijke links klaarzetten
     zipUrls.forEach(u => URL.revokeObjectURL(u)); zipUrls = [];
     const urlMap = {};
-    for (const [n, d] of entries) { const u = URL.createObjectURL(new Blob([d])); zipUrls.push(u); urlMap[base(n)] = u; }
+    for (const [n, d] of entries) { if (n === mName) continue; const u = URL.createObjectURL(new Blob([d])); zipUrls.push(u); urlMap[base(n)] = u; }
     const manager = new THREE.LoadingManager();
     manager.setURLModifier(url => urlMap[base(decodeURIComponent(url.split('?')[0]))] || url);
     const shortName = mName.split('/').pop();
@@ -442,7 +451,8 @@ function loadZip(file) {
     } else if (ext === 'gltf') {
       new GLTFLoader(manager).parse(strFromU8(mData), '', g => setModel(g.scene, shortName), err => fail('Laden mislukt: ' + err.message));
     } else {
-      loadFile(new File([mData], shortName));
+      trace('model uitlezen: ' + shortName);
+      parseData(ext, ext === 'gltf' ? strFromU8(mData) : mData.buffer.slice(mData.byteOffset, mData.byteOffset + mData.byteLength), shortName);
     }
     if (models.length > 1) setTimeout(() => alert('De ZIP bevat ' + models.length + ' modellen. Geopend: ' + shortName + ' (de grootste).'), 300);
   }).catch(err => fail('Laden mislukt: ' + (err.message || err)))
@@ -500,10 +510,21 @@ function loadFile(file) {
   if (['ztl', 'zpr', 'zbr'].includes(ext)) return fail('ZBrush-bestanden (.' + ext + ') kunnen niet in een browser geopend worden.\n\nExporteer in ZBrush als FBX (Zplugin > FBX ExportImport) of OBJ en open dat bestand. Bij FBX blijven je subtools als groepen behouden.');
   if (!['obj', 'stl', 'glb', 'gltf', '3dm', 'fbx'].includes(ext)) return fail('Dit bestandstype wordt niet ondersteund: .' + ext + '\nKies een OBJ, STL, GLB, FBX, 3DM of ZIP bestand.');
   busy.style.display = 'flex';
+  trace('bestand lezen: ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)');
   const reader = new FileReader();
   reader.onload = e => {
     const data = e.target.result;
-    setTimeout(() => {
+    trace('model uitlezen: ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)');
+    setTimeout(() => parseData(ext, data, file.name), 30);
+  };
+  reader.onerror = () => { trace('klaar'); fail('Het bestand kon niet gelezen worden.'); };
+  if (ext === 'obj' || ext === 'gltf') reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+function parseData(ext, data, name) {
+  const file = { name };
+  busy.style.display = 'flex';
       try {
         if (ext === 'obj') {
           setModel(new OBJLoader().parse(data), file.name);
@@ -523,13 +544,9 @@ function loadFile(file) {
           new GLTFLoader().parse(data, '', g => setModel(g.scene, file.name), err => fail('Laden mislukt: ' + err.message));
         }
       } catch (err) {
+        trace('klaar');
         fail('Laden mislukt: ' + err.message);
       }
-    }, 30);
-  };
-  reader.onerror = () => fail('Het bestand kon niet gelezen worden.');
-  if (ext === 'obj' || ext === 'gltf') reader.readAsText(file);
-  else reader.readAsArrayBuffer(file);
 }
 
 // ---------- Verkleinen (decimeren) ----------
@@ -584,13 +601,9 @@ function weldFast(g, eps) {
   return out;
 }
 function simplifyGeometry(geo, targetTris, simp) {
-  let g = geo.clone();
-  for (const k of Object.keys(g.attributes)) {
-    if (!['position', 'uv', 'color'].includes(k)) g.deleteAttribute(k);
-    else g.setAttribute(k, plainFloat(g.attributes[k]));
-  }
-  g.morphAttributes = {};
-  g.clearGroups();
+  let g = new THREE.BufferGeometry();
+  for (const k of ['position', 'uv', 'color']) if (geo.attributes[k]) g.setAttribute(k, plainFloat(geo.attributes[k]));
+  if (geo.index) g.setIndex(geo.index);
   g.computeBoundingBox();
   const diag = g.boundingBox.getSize(new THREE.Vector3()).length() || 1;
   if (!g.index) g = weldFast(g, diag * 1e-6);
@@ -638,6 +651,7 @@ function setModel(obj, name) {
   if (total <= AUTO_MAX_TRIS) return setModelNow(obj, name);
   busy.style.display = 'flex';
   busy.textContent = 'Groot model (' + total.toLocaleString('nl-NL') + ' driehoeken) verkleinen…';
+  trace('verkleinen van ' + total.toLocaleString('nl-NL') + ' driehoeken');
   setTimeout(() => {
     decimateObject(obj, AUTO_MAX_TRIS)
       .then(orig => { obj.userData.origTris = orig; obj.userData.note = ' (verkleind van ' + orig.toLocaleString('nl-NL') + ')'; setModelNow(obj, name); })
@@ -821,6 +835,7 @@ document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.onclick = () => {
 });
 
 function setModelNow(obj, name) {
+  trace('model tonen');
   currentName = name;
   shownDensity = -1;
   if (model && model !== obj) {
@@ -868,6 +883,7 @@ function setModelNow(obj, name) {
   empty.style.display = 'none';
   busy.style.display = 'none';
   info.textContent = `${name} · ${Math.round(tris).toLocaleString('nl-NL')} driehoeken` + (model.userData.note || '');
+  setTimeout(() => trace('klaar'), 1500);
 }
 
 // ---------- Groepen aan/uit ----------

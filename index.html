@@ -133,6 +133,7 @@
   </div>
   <div class="row">
     <button id="decBtn">✂ Verklein</button>
+    <button id="dblBtn">◐ Dubbel</button>
     <button id="saveBtn">💾 Opslaan</button>
   </div>
 </div>
@@ -659,6 +660,24 @@ function stripHelpers(obj) {
   obj.position.set(0, 0, 0);
 }
 
+// ---------- Dubbelzijdig: ook de binnen-/achterkant van vlakken tonen ----------
+let doubleSided = false;
+const dblBtn = document.getElementById('dblBtn');
+function applySides() {
+  dblBtn.classList.toggle('on', doubleSided);
+  if (!model) return;
+  model.traverse(c => {
+    if (!c.isMesh || !c.userData.orig) return;
+    (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(mt => {
+      if (mt === matDefault) return;
+      if (mt.userData.origSide === undefined) mt.userData.origSide = mt.side;
+      mt.side = doubleSided ? THREE.DoubleSide : mt.userData.origSide;
+      mt.needsUpdate = true;
+    });
+  });
+}
+dblBtn.onclick = () => { doubleSided = !doubleSided; applySides(); };
+
 const decPanel = document.getElementById('decPanel');
 const decNum = document.getElementById('decNum');
 function nf0(n) { return Math.round(n).toLocaleString('nl-NL'); }
@@ -810,6 +829,7 @@ function setModelNow(obj, name) {
 
   orient.add(model);
   resetOrientation();
+  applySides();
   applyMode();
   buildParts();
   setView('front');

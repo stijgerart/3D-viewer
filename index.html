@@ -81,7 +81,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven</div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 20:30</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -112,11 +112,6 @@
     <button data-mode="solid" class="on">Solid</button>
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
-  </div>
-  <div class="row" id="lineRow">
-    <span class="lineLbl">Veel</span>
-    <input id="lineDensity" type="range" min="0" max="10" step="1" value="3">
-    <span class="lineLbl">Weinig</span>
   </div>
   <div class="row">
     <button data-view="front">Voor</button>
@@ -892,23 +887,30 @@ document.getElementById('closePanel').onclick = () => { panel.style.display = 'n
 document.getElementById('allOn').onclick = () => setAll(true);
 document.getElementById('allOff').onclick = () => setAll(false);
 
+let solidLines = false;   // Solid-knop wisselt tussen Solid en Solid + mesh
 function applyMode() {
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  const solidBtn = document.querySelector('[data-mode="solid"]');
+  solidBtn.textContent = mode === 'solid' && solidLines ? 'Solid + mesh' : 'Solid';
+  const showWire = mode === 'wire' || (mode === 'solid' && solidLines);
   if (!model) return;
   model.traverse(c => {
     if (!c.isMesh) return;
     c.material = mode === 'solid' ? c.userData.orig : matFill;
     c.userData.edges.visible = mode === 'outline';
-    c.userData.wire.visible = mode === 'wire';
+    c.userData.wire.visible = showWire;
+    // Solid + mesh: vlak iets naar achteren zodat de lijnen er netjes bovenop liggen
+    (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(mt => {
+      mt.polygonOffset = solidLines; mt.polygonOffsetFactor = 1; mt.polygonOffsetUnits = 1;
+    });
   });
-  document.body.classList.toggle('wiremode', mode === 'wire');
-  if (mode === 'wire') applyLineDensity();
+  if (showWire) applyLineDensity();
 }
 
 // ---------- Hoeveelheid mesh-lijnen ----------
 // 0 = alle lijnen; hoger = alleen lijnen waar het oppervlak een knik maakt
 const LINE_ANGLES = [0, 1, 3, 6, 10, 15, 20, 26, 33, 41, 50];
-const lineDensity = document.getElementById('lineDensity');
+const lineDensity = { value: '0' };   // altijd de volledige mesh
 let shownDensity = -1;
 function applyLineDensity() {
   const lvl = parseInt(lineDensity.value, 10);
@@ -927,7 +929,6 @@ function applyLineDensity() {
     busy.style.display = 'none';
   }, 30);
 }
-lineDensity.onchange = applyLineDensity;
 
 function setView(v) {
   // Op een smal (staand) scherm iets verder weg, zodat het object past
@@ -938,7 +939,12 @@ function setView(v) {
   controls.update();
 }
 
-document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { mode = b.dataset.mode; applyMode(); });
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+  if (b.dataset.mode === 'solid' && mode === 'solid') solidLines = !solidLines;
+  else if (b.dataset.mode === 'solid') solidLines = false;
+  mode = b.dataset.mode;
+  applyMode();
+});
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
 document.querySelectorAll('[data-rot]').forEach(b => b.onclick = () => rotateModel(b.dataset.rot));
 document.getElementById('mirror').onclick = mirrorModel;

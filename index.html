@@ -21,6 +21,8 @@
   #info{flex:1;font-size:13px;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #bottom{position:fixed;left:0;right:0;bottom:0;padding:8px 10px calc(env(safe-area-inset-bottom) + 10px);display:flex;flex-direction:column;gap:8px;z-index:2;background:linear-gradient(#1e1f2400,#1e1f24ee)}
   .row{display:flex;gap:6px}
+  #solidLinesRow{display:none}
+  body.solidmode #solidLinesRow{display:flex}
   #lineRow{display:none;align-items:center;gap:10px;padding:0 4px}
   body.wiremode #lineRow{display:flex}
   .lineLbl{font-size:14px;font-weight:700;color:#fff;white-space:nowrap}
@@ -81,7 +83,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 20:30</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 20:35</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -112,6 +114,9 @@
     <button data-mode="solid" class="on">Solid</button>
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
+  </div>
+  <div class="row" id="solidLinesRow">
+    <button id="solidLinesBtn">☐ Mesh-lijnen op Solid</button>
   </div>
   <div class="row">
     <button data-view="front">Voor</button>
@@ -890,8 +895,10 @@ document.getElementById('allOff').onclick = () => setAll(false);
 let solidLines = false;   // Solid-knop wisselt tussen Solid en Solid + mesh
 function applyMode() {
   document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
-  const solidBtn = document.querySelector('[data-mode="solid"]');
-  solidBtn.textContent = mode === 'solid' && solidLines ? 'Solid + mesh' : 'Solid';
+  document.body.classList.toggle('solidmode', mode === 'solid');
+  const slb = document.getElementById('solidLinesBtn');
+  slb.textContent = (solidLines ? '☑' : '☐') + ' Mesh-lijnen op Solid';
+  slb.classList.toggle('on', solidLines);
   const showWire = mode === 'wire' || (mode === 'solid' && solidLines);
   if (!model) return;
   model.traverse(c => {
@@ -939,12 +946,8 @@ function setView(v) {
   controls.update();
 }
 
-document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
-  if (b.dataset.mode === 'solid' && mode === 'solid') solidLines = !solidLines;
-  else if (b.dataset.mode === 'solid') solidLines = false;
-  mode = b.dataset.mode;
-  applyMode();
-});
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { mode = b.dataset.mode; applyMode(); });
+document.getElementById('solidLinesBtn').onclick = () => { solidLines = !solidLines; applyMode(); };
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
 document.querySelectorAll('[data-rot]').forEach(b => b.onclick = () => rotateModel(b.dataset.rot));
 document.getElementById('mirror').onclick = mirrorModel;

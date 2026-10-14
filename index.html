@@ -83,7 +83,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 20:35</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 20:40</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -134,6 +134,7 @@
   <div class="row">
     <button id="decBtn">✂ Verklein</button>
     <button id="dblBtn">◐ Dubbel</button>
+    <button id="flipBtn">⇅ Flip</button>
     <button id="saveBtn">💾 Opslaan</button>
   </div>
 </div>
@@ -678,6 +679,39 @@ function applySides() {
 }
 dblBtn.onclick = () => { doubleSided = !doubleSided; applySides(); };
 
+// ---------- Flip: vlakken omdraaien (binnenstebuiten model repareren) ----------
+const flipBtn = document.getElementById('flipBtn');
+function flipGeometry(g) {
+  if (g.index) {
+    const a = g.index.array;
+    for (let i = 0; i + 2 < a.length; i += 3) { const t = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = t; }
+    g.index.needsUpdate = true;
+  } else {
+    for (const at of Object.values(g.attributes)) {
+      const n = at.itemSize, arr = at.array;
+      if (at.isInterleavedBufferAttribute) continue;
+      for (let v = 0; v + 2 < at.count; v += 3) for (let c = 0; c < n; c++) {
+        const p = (v + 1) * n + c, q = (v + 2) * n + c, t = arr[p]; arr[p] = arr[q]; arr[q] = t;
+      }
+      at.needsUpdate = true;
+    }
+  }
+  const nr = g.attributes.normal;
+  if (nr && !nr.isInterleavedBufferAttribute) { for (let i = 0; i < nr.array.length; i++) nr.array[i] = -nr.array[i]; nr.needsUpdate = true; }
+}
+flipBtn.onclick = () => {
+  if (!model) return fail('Open eerst een model.');
+  model.traverse(c => {
+    if (!c.isMesh) return;
+    flipGeometry(c.geometry);
+    if (c.userData.wireCache) { Object.values(c.userData.wireCache).forEach(w => w.dispose()); c.userData.wireCache = {}; }
+  });
+  model.userData.flipped = !model.userData.flipped;
+  flipBtn.classList.toggle('on', !!model.userData.flipped);
+  shownDensity = -1;
+  applyMode();
+};
+
 const decPanel = document.getElementById('decPanel');
 const decNum = document.getElementById('decNum');
 function nf0(n) { return Math.round(n).toLocaleString('nl-NL'); }
@@ -830,6 +864,7 @@ function setModelNow(obj, name) {
   orient.add(model);
   resetOrientation();
   applySides();
+  flipBtn.classList.toggle('on', !!model.userData.flipped);
   applyMode();
   buildParts();
   setView('front');

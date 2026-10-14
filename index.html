@@ -615,6 +615,12 @@ async function decimateObject(obj, targetTotal) {
     g.dispose();
     if (Array.isArray(m.material)) m.material = m.material[0];
     if (!ng.attributes.uv && m.material && m.material.map) { m.material = m.material.clone(); m.material.map = null; }
+    // Facetten tonen: elk vlak zijn eigen schaduw, zodat de hoeken zichtbaar zijn
+    if (m.material && 'flatShading' in m.material) {
+      if (!m.material.userData.flatCopy) { m.material = m.material.clone(); m.material.userData.flatCopy = true; }
+      m.material.flatShading = true;
+      m.material.needsUpdate = true;
+    }
     await new Promise(res => setTimeout(res, 0));
   }
   return total;

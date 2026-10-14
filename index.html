@@ -21,8 +21,6 @@
   #info{flex:1;font-size:13px;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #bottom{position:fixed;left:0;right:0;bottom:0;padding:8px 10px calc(env(safe-area-inset-bottom) + 10px);display:flex;flex-direction:column;gap:8px;z-index:2;background:linear-gradient(#1e1f2400,#1e1f24ee)}
   .row{display:flex;gap:6px}
-  #solidLinesRow{display:none}
-  body.solidmode #solidLinesRow{display:flex}
   #lineRow{display:none;align-items:center;gap:10px;padding:0 4px}
   body.wiremode #lineRow{display:flex}
   .lineLbl{font-size:14px;font-weight:700;color:#fff;white-space:nowrap}
@@ -83,7 +81,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 20:40</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 20:55</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -115,9 +113,7 @@
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
   </div>
-  <div class="row" id="solidLinesRow">
-    <button id="solidLinesBtn">☐ Mesh-lijnen op Solid</button>
-  </div>
+
   <div class="row">
     <button data-view="front">Voor</button>
     <button data-view="side">Zij</button>
@@ -395,6 +391,7 @@ function resetOrientation() {
 
 const matDefault = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide });
 const matWire = new THREE.LineBasicMaterial({ color: 0x7fb2ff });
+const matWireBlack = new THREE.LineBasicMaterial({ color: 0x000000 });
 // Onzichtbare vulling: schrijft alleen diepte, zodat lijnen aan de achterkant wegvallen maar alles erachter zichtbaar blijft
 const matFill = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, side: THREE.DoubleSide });
 const matLine = new THREE.LineBasicMaterial({ color: 0xffffff });
@@ -929,11 +926,8 @@ document.getElementById('allOff').onclick = () => setAll(false);
 
 let solidLines = false;   // Solid-knop wisselt tussen Solid en Solid + mesh
 function applyMode() {
-  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
-  document.body.classList.toggle('solidmode', mode === 'solid');
-  const slb = document.getElementById('solidLinesBtn');
-  slb.textContent = (solidLines ? '☑' : '☐') + ' Mesh-lijnen op Solid';
-  slb.classList.toggle('on', solidLines);
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on',
+    b.dataset.mode === mode || (b.dataset.mode === 'wire' && mode === 'solid' && solidLines)));
   const showWire = mode === 'wire' || (mode === 'solid' && solidLines);
   if (!model) return;
   model.traverse(c => {
@@ -941,6 +935,7 @@ function applyMode() {
     c.material = mode === 'solid' ? c.userData.orig : matFill;
     c.userData.edges.visible = mode === 'outline';
     c.userData.wire.visible = showWire;
+    c.userData.wire.material = mode === 'solid' ? matWireBlack : matWire;   // zwart over Solid, blauw los
     // Solid + mesh: vlak iets naar achteren zodat de lijnen er netjes bovenop liggen
     (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(mt => {
       mt.polygonOffset = solidLines; mt.polygonOffsetFactor = 1; mt.polygonOffsetUnits = 1;
@@ -981,8 +976,21 @@ function setView(v) {
   controls.update();
 }
 
-document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { mode = b.dataset.mode; applyMode(); });
-document.getElementById('solidLinesBtn').onclick = () => { solidLines = !solidLines; applyMode(); };
+// Solid en Mesh kun je combineren (mesh-lijnen over Solid); Outline staat los
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+  const k = b.dataset.mode;
+  if (k === 'outline') { mode = 'outline'; solidLines = false; }
+  else if (k === 'solid') {
+    if (mode === 'wire') { mode = 'solid'; solidLines = true; }          // Solid erbij onder de mesh
+    else if (mode === 'solid' && solidLines) { mode = 'wire'; solidLines = false; } // Solid uit, mesh blijft
+    else { mode = 'solid'; solidLines = false; }
+  } else {
+    if (mode === 'solid') solidLines = !solidLines;                     // mesh aan/uit over Solid
+    else if (mode === 'wire') { mode = 'solid'; solidLines = false; }   // mesh uit → terug naar Solid
+    else mode = 'wire';
+  }
+  applyMode();
+});
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
 document.querySelectorAll('[data-rot]').forEach(b => b.onclick = () => rotateModel(b.dataset.rot));
 document.getElementById('mirror').onclick = mirrorModel;

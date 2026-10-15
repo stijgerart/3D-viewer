@@ -76,7 +76,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 001 · 15 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 002 · 15 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -85,7 +85,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 001 · 15 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 002 · 15 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -425,7 +425,8 @@ const matFill = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: 
 const matLine = new THREE.LineBasicMaterial({ color: 0xffffff });
 
 let model = null;
-let mode = 'solid';
+let mode = 'solid';   // afgeleid: 'solid' als Solid aan staat, anders 'outline' of 'wire'
+const show = { solid: true, wire: false, outline: false };   // drie losse aan/uit-knoppen
 const info = document.getElementById('info');
 const busy = document.getElementById('busy');
 const empty = document.getElementById('empty');
@@ -837,8 +838,8 @@ document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.onclick = () => {
   savePanel.style.display = 'none';
   busy.style.display = 'flex';
   busy.textContent = 'Opslaan…';
-  const oldMode = mode;
-  mode = 'solid'; applyMode();
+  const oldShow = { ...show };
+  show.solid = true; applyMode();
   // Hulplijnen tijdelijk weg, originele maat (geen schermschaal)
   model.traverse(c => { if (c.isMesh) { c.userData._helpers = [c.userData.edges, c.userData.wire].filter(Boolean); c.userData._helpers.forEach(h => c.remove(h)); } });
   const sc = model.scale.clone(), pos = model.position.clone();
@@ -847,7 +848,7 @@ document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.onclick = () => {
   const restore = () => {
     model.scale.copy(sc); model.position.copy(pos);
     model.traverse(c => { if (c.isMesh && c.userData._helpers) { c.userData._helpers.forEach(h => c.add(h)); delete c.userData._helpers; } });
-    mode = oldMode; applyMode();
+    Object.assign(show, oldShow); applyMode();
     busy.style.display = 'none'; busy.textContent = 'Laden…';
   };
   const base = (currentName || 'model').replace(/\.[^.]+$/, '') + '-' + countTris(model);
@@ -973,11 +974,12 @@ document.getElementById('closePanel').onclick = () => { panel.style.display = 'n
 document.getElementById('allOn').onclick = () => setAll(true);
 document.getElementById('allOff').onclick = () => setAll(false);
 
-let solidLines = false;   // Solid-knop wisselt tussen Solid en Solid + mesh
+let solidLines = false;   // mesh-lijnen over Solid
 function applyMode() {
-  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on',
-    b.dataset.mode === mode || (b.dataset.mode === 'wire' && mode === 'solid' && solidLines)));
-  const showWire = mode === 'wire' || (mode === 'solid' && solidLines);
+  mode = show.solid ? 'solid' : show.outline ? 'outline' : 'wire';
+  solidLines = show.solid && show.wire;
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', show[b.dataset.mode]));
+  const showWire = show.wire;
   if (!model) return;
   model.traverse(c => {
     if (!c.isMesh) return;
@@ -1025,19 +1027,11 @@ function setView(v) {
   controls.update();
 }
 
-// Solid en Mesh kun je combineren (mesh-lijnen over Solid); Outline staat los
+// Solid, Outline en Mesh zijn losse aan/uit-knoppen die je kunt combineren
 document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
   const k = b.dataset.mode;
-  if (k === 'outline') { mode = 'outline'; solidLines = false; }
-  else if (k === 'solid') {
-    if (mode === 'wire') { mode = 'solid'; solidLines = true; }          // Solid erbij onder de mesh
-    else if (mode === 'solid' && solidLines) { mode = 'wire'; solidLines = false; } // Solid uit, mesh blijft
-    else { mode = 'solid'; solidLines = false; }
-  } else {
-    if (mode === 'solid') solidLines = !solidLines;                     // mesh aan/uit over Solid
-    else if (mode === 'wire') { mode = 'solid'; solidLines = false; }   // mesh uit → terug naar Solid
-    else mode = 'wire';
-  }
+  show[k] = !show[k];
+  if (!show.solid && !show.wire && !show.outline) show.solid = true;   // nooit alles uit
   applyMode();
 });
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
@@ -1386,7 +1380,7 @@ function buildHulls() {
 }
 function isShown(o) { for (let p = o; p; p = p.parent) if (!p.visible) return false; return true; }
 function syncHulls() {
-  const on = mode === 'outline';
+  const on = show.outline;
   if (on) { mirrorGroup.updateMatrixWorld(true); renderer.getDrawingBufferSize(matOutline.uniforms.uRes.value); matOutline.uniforms.uWidth.value = OUTLINE_PX * renderer.getPixelRatio(); }
   for (const h of hulls) {
     h.visible = on && isShown(h.userData.src);

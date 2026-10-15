@@ -79,7 +79,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 14 okt · 21:40</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 15 okt · 08:35</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -718,6 +718,7 @@ flipBtn.onclick = () => {
   model.userData.flipped = !model.userData.flipped;
   flipBtn.classList.toggle('on', !!model.userData.flipped);
   shownDensity = -1;
+  buildHulls();
   applyMode();
 };
 
@@ -875,6 +876,7 @@ function setModelNow(obj, name) {
   resetOrientation();
   applySides();
   flipBtn.classList.toggle('on', !!model.userData.flipped);
+  buildHulls();
   applyMode();
   buildParts();
   setView('front');
@@ -947,7 +949,7 @@ function applyMode() {
   model.traverse(c => {
     if (!c.isMesh) return;
     c.material = mode === 'solid' ? c.userData.orig : matFill;
-    c.userData.edges.visible = mode === 'outline';
+    c.userData.edges.visible = false;   // outline gaat nu via de silhouetrand
     c.userData.wire.visible = showWire;
     c.userData.wire.material = mode === 'solid' ? matWireBlack : matWire;   // zwart over Solid, blauw los
     // Solid + mesh: vlak iets naar achteren zodat de lijnen er netjes bovenop liggen
@@ -1277,8 +1279,91 @@ function camOff() {
 camBtn.onclick = () => { camStream ? camOff() : camOn(); };
 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) camBtn.style.display = 'none';
 
+// ---------- Outline: alleen de buitenrand (silhouet), geen lijnen op de voorkant ----------
+// Methode: achterkant van het model iets naar buiten geschoven en wit getekend;
+// de (onzichtbare) voorkant dekt alles af behalve een strakke rand van vaste dikte.
+const OUTLINE_PX = 2.2;
+const matOutline = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: { uColor: { value: new THREE.Color(0xffffff) }, uWidth: { value: OUTLINE_PX }, uRes: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: `
+    attribute vec3 outlineNormal;
+    uniform float uWidth; uniform vec2 uRes;
+    void main() {
+      vec4 clip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      vec4 cn = projectionMatrix * vec4(normalMatrix * outlineNormal, 0.0);
+      vec2 d = cn.xy * uRes;
+      float l = length(d);
+      if (l > 1e-6) clip.xy += (d / l) * uWidth * 2.0 / uRes * clip.w;
+      gl_Position = clip;
+    }`,
+  fragmentShader: `uniform vec3 uColor; void main() { gl_FragColor = vec4(uColor, 1.0); }`
+});
+const hullRoot = new THREE.Group();
+scene.add(hullRoot);
+let hulls = [];
+// Gladde normalen per positie (ook bij losse driehoeken), zodat de rand geen gaten heeft
+function smoothOutlineNormals(g) {
+  const pos = g.attributes.position, n = pos.count, idx = g.index ? g.index.array : null;
+  g.computeBoundingBox();
+  const inv = 1 / ((g.boundingBox.getSize(new THREE.Vector3()).length() || 1) * 1e-6);
+  let size = 1; while (size < n * 2) size <<= 1;
+  const table = new Int32Array(size).fill(-1), mask = size - 1, cl = new Int32Array(n), rep = [];
+  for (let i = 0; i < n; i++) {
+    const x = Math.round(pos.getX(i) * inv), y = Math.round(pos.getY(i) * inv), z = Math.round(pos.getZ(i) * inv);
+    let h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) & mask;
+    for (;;) {
+      const j = table[h];
+      if (j < 0) { table[h] = rep.length; cl[i] = rep.length; rep.push(i); break; }
+      const k = rep[j];
+      if (Math.round(pos.getX(k) * inv) === x && Math.round(pos.getY(k) * inv) === y && Math.round(pos.getZ(k) * inv) === z) { cl[i] = j; break; }
+      h = (h + 1) & mask;
+    }
+  }
+  const acc = new Float32Array(rep.length * 3), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const m = idx ? idx.length : n;
+  for (let t = 0; t + 2 < m; t += 3) {
+    const i0 = idx ? idx[t] : t, i1 = idx ? idx[t + 1] : t + 1, i2 = idx ? idx[t + 2] : t + 2;
+    a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2);
+    b.sub(a); c.sub(a); b.cross(c);   // gewogen naar oppervlak
+    for (const v of [i0, i1, i2]) { const q = cl[v] * 3; acc[q] += b.x; acc[q + 1] += b.y; acc[q + 2] += b.z; }
+  }
+  const out = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const q = cl[i] * 3; let x = acc[q], y = acc[q + 1], z = acc[q + 2];
+    const l = Math.hypot(x, y, z) || 1;
+    out[i * 3] = x / l; out[i * 3 + 1] = y / l; out[i * 3 + 2] = z / l;
+  }
+  g.setAttribute('outlineNormal', new THREE.BufferAttribute(out, 3));
+}
+function buildHulls() {
+  hulls.forEach(h => hullRoot.remove(h));
+  hulls = [];
+  if (!model) return;
+  model.traverse(c => {
+    if (!c.isMesh || c.isSkinnedMesh) return;
+    try { smoothOutlineNormals(c.geometry); } catch (e) { return; }
+    const h = new THREE.Mesh(c.geometry, matOutline);
+    h.matrixAutoUpdate = false;
+    h.frustumCulled = false;
+    h.userData.src = c;
+    hulls.push(h);
+    hullRoot.add(h);
+  });
+}
+function isShown(o) { for (let p = o; p; p = p.parent) if (!p.visible) return false; return true; }
+function syncHulls() {
+  const on = mode === 'outline';
+  if (on) { mirrorGroup.updateMatrixWorld(true); renderer.getDrawingBufferSize(matOutline.uniforms.uRes.value); matOutline.uniforms.uWidth.value = OUTLINE_PX * renderer.getPixelRatio(); }
+  for (const h of hulls) {
+    h.visible = on && isShown(h.userData.src);
+    if (h.visible) h.matrix.copy(h.userData.src.matrixWorld);
+  }
+}
+
 renderer.setAnimationLoop(() => {
   controls.update();
+  syncHulls();
   renderer.render(scene, camera);
 });
 </script>

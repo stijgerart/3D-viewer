@@ -68,9 +68,15 @@
   #savePanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   .saveBig{background:#4a7cff;border-color:#4a7cff;color:#fff;font-weight:700;font-size:19px;min-height:60px}
   #saveInfo{font-size:15px;opacity:.8;line-height:1.4}
+  #splash{position:fixed;inset:0;z-index:50;background:#1e1f24;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;transition:opacity .5s}
+  #splash.gone{opacity:0;pointer-events:none}
+  .sp-logo{font-size:72px;color:#4a7cff;line-height:1}
+  .sp-title{font-size:30px;font-weight:700;color:#fff}
+  .sp-ver{font-size:16px;color:#aaa}
 </style>
 </head>
 <body>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">Versie 15 okt · 08:45</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -79,7 +85,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 15 okt · 08:35</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 15 okt · 08:45</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -401,6 +407,9 @@ const busy = document.getElementById('busy');
 const empty = document.getElementById('empty');
 
 function fail(msg) { busy.style.display = 'none'; trace('klaar'); alert(msg); }
+
+// Startscherm 2 seconden tonen
+setTimeout(() => { const sp = document.getElementById('splash'); sp.classList.add('gone'); setTimeout(() => sp.remove(), 600); }, 2000);
 
 // ---------- Stappen bijhouden: als de telefoon de pagina afsluit, zien we waar het misging ----------
 function trace(step) { try { localStorage.setItem('viewerStep', step); } catch (e) {} }

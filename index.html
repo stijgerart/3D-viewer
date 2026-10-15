@@ -76,7 +76,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">Versie 15 okt · 08:45</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">Versie 15 okt · 08:55</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -85,7 +85,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen en verschuiven<br><br><small>Versie 15 okt · 08:45</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>Versie 15 okt · 08:55</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -369,6 +369,30 @@ function updateFloor() {
   const box = new THREE.Box3().setFromObject(mirrorGroup);
   grid.position.y = box.min.y;
 }
+
+// ---------- Twee vingers draaien = model kantelen (rond de kijkrichting) ----------
+(() => {
+  const el = renderer.domElement, pts = new Map();
+  let lastAng = null;
+  const ang = () => { const [a, b] = [...pts.values()]; return Math.atan2(b.y - a.y, b.x - a.x); };
+  el.addEventListener('pointerdown', e => { pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); lastAng = pts.size === 2 ? ang() : null; });
+  el.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size !== 2 || lastAng === null || !model) return;
+    const a = ang();
+    let d = a - lastAng;
+    if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+    lastAng = a;
+    if (Math.abs(d) < 0.002) return;
+    const axis = camera.getWorldDirection(new THREE.Vector3());
+    if (mirrorGroup.scale.x < 0) { axis.x = -axis.x; d = -d; }   // gespiegeld: as en richting omkeren
+    orient.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, d));
+  });
+  const end = e => { pts.delete(e.pointerId); lastAng = pts.size === 2 ? ang() : null; if (pts.size === 0 && model) updateFloor(); };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+})();
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
 function rotateModel(axis) {

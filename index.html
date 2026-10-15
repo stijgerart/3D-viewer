@@ -76,7 +76,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 002 · 15 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 003 · 15 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -85,7 +85,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 002 · 15 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 003 · 15 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -116,6 +116,7 @@
     <button data-mode="solid" class="on">Solid</button>
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
+    <button id="colBtn">🎨 Std</button>
   </div>
 
   <div class="row">
@@ -1388,8 +1389,34 @@ function syncHulls() {
   }
 }
 
-renderer.setAnimationLoop(() => {
+// ---------- Lijnkleur: standaard → zwart → wit → knipperen ----------
+const LINE_COLORS = ['std', 'zwart', 'wit', 'knipper'];
+const COL_LABEL = { std: '🎨 Std', zwart: '⬛ Zwart', wit: '⬜ Wit', knipper: '✴ Knipper' };
+let lineCol = 'std';
+const colBtn = document.getElementById('colBtn');
+const defCols = { outline: new THREE.Color(0xffffff), wire: matWire.color.clone(), wireBlack: matWireBlack.color.clone() };
+const tmpCol = new THREE.Color();
+colBtn.onclick = () => {
+  lineCol = LINE_COLORS[(LINE_COLORS.indexOf(lineCol) + 1) % LINE_COLORS.length];
+  colBtn.textContent = COL_LABEL[lineCol];
+  colBtn.classList.toggle('on', lineCol !== 'std');
+};
+function syncLineColors(t) {
+  if (lineCol === 'std') {
+    matOutline.uniforms.uColor.value.copy(defCols.outline);
+    matWire.color.copy(defCols.wire); matWireBlack.color.copy(defCols.wireBlack);
+    return;
+  }
+  // knipperen: zacht van zwart naar wit en terug (1 keer per seconde)
+  const v = lineCol === 'zwart' ? 0 : lineCol === 'wit' ? 1 : 0.5 - 0.5 * Math.cos(t * 0.001 * Math.PI * 2);
+  tmpCol.setRGB(v, v, v);
+  matOutline.uniforms.uColor.value.copy(tmpCol);
+  matWire.color.copy(tmpCol); matWireBlack.color.copy(tmpCol);
+}
+
+renderer.setAnimationLoop((t) => {
   controls.update();
+  syncLineColors(t || performance.now());
   syncHulls();
   renderer.render(scene, camera);
 });

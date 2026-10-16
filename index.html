@@ -24,6 +24,12 @@
   .lineLbl{font-size:14px;font-weight:700;color:#fff;white-space:nowrap}
   #lineDensity{flex:1;height:44px;accent-color:#4a7cff}
   .row button{flex:1;min-width:0;padding-left:4px;padding-right:4px}
+  /* Twee schuifbare rijen: veeg links/rechts voor meer knoppen */
+  .srow{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;scroll-snap-type:x proximity;padding-bottom:2px;
+        -webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
+  .srow::-webkit-scrollbar{display:none}
+  .srow.end{-webkit-mask-image:none;mask-image:none}
+  .srow button{flex:0 0 auto;min-width:96px;padding:12px 14px;white-space:nowrap;scroll-snap-align:start;font-size:16px}
   button,label.btn{background:#2e3038;border:1px solid #444;color:#eee;padding:12px 10px;border-radius:10px;font-size:15px;min-height:46px;cursor:pointer;text-align:center;user-select:none}
   button:active,label.btn:active{background:#3a3d47}
   button.on{background:#4a7cff;border-color:#4a7cff}
@@ -76,7 +82,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 005 · 16 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 006 · 16 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -85,7 +91,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 005 · 16 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 006 · 16 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -112,34 +118,29 @@
 </div>
 <video id="camVideo" playsinline muted autoplay></video>
 <div id="bottom">
-  <div class="row">
+  <div class="row srow">
     <button data-mode="solid" class="on">Solid</button>
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
     <button id="texBtn">🖼 Textuur</button>
+    <button id="colBtn">🎨 Std</button>
+    <button id="dblBtn">◐ Dubbel</button>
+    <button id="flipBtn">⇅ Flip</button>
+    <button id="decBtn">✂ Verklein</button>
+    <button id="saveBtn">💾 Opslaan</button>
   </div>
-
-  <div class="row">
+  <div class="row srow">
     <button data-view="front">Voor</button>
     <button data-view="side">Zij</button>
     <button data-view="top">Boven</button>
     <button id="spin">Draai</button>
-    <button id="colBtn">🎨 Std</button>
-  </div>
-  <input id="texFile" type="file" accept="image/*" hidden>
-  <div class="row">
     <button data-rot="x">↻ X 90°</button>
     <button data-rot="y">↻ Y 90°</button>
     <button data-rot="z">↻ Z 90°</button>
     <button id="mirror">⇋ Spiegel</button>
     <button id="resetRot">Reset</button>
   </div>
-  <div class="row">
-    <button id="decBtn">✂ Verklein</button>
-    <button id="dblBtn">◐ Dubbel</button>
-    <button id="flipBtn">⇅ Flip</button>
-    <button id="saveBtn">💾 Opslaan</button>
-  </div>
+  <input id="texFile" type="file" accept="image/*" hidden>
 </div>
 <div id="panel">
   <div class="phead">
@@ -435,6 +436,12 @@ const busy = document.getElementById('busy');
 const empty = document.getElementById('empty');
 
 function fail(msg) { busy.style.display = 'none'; trace('klaar'); alert(msg); }
+
+// Schuifrijen: vervaging rechts weg als je aan het eind bent
+document.querySelectorAll('.srow').forEach(r => {
+  const upd = () => r.classList.toggle('end', r.scrollLeft + r.clientWidth >= r.scrollWidth - 4);
+  r.addEventListener('scroll', upd, { passive: true }); addEventListener('resize', upd); setTimeout(upd, 100);
+});
 
 // Startscherm 2 seconden tonen
 setTimeout(() => { const sp = document.getElementById('splash'); sp.classList.add('gone'); setTimeout(() => sp.remove(), 600); }, 2000);

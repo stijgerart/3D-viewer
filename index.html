@@ -76,7 +76,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 004 · 15 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 005 · 16 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -85,7 +85,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 004 · 15 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 005 · 16 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -116,7 +116,7 @@
     <button data-mode="solid" class="on">Solid</button>
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
-    <button id="colBtn">🎨 Std</button>
+    <button id="texBtn">🖼 Textuur</button>
   </div>
 
   <div class="row">
@@ -124,7 +124,9 @@
     <button data-view="side">Zij</button>
     <button data-view="top">Boven</button>
     <button id="spin">Draai</button>
+    <button id="colBtn">🎨 Std</button>
   </div>
+  <input id="texFile" type="file" accept="image/*" hidden>
   <div class="row">
     <button data-rot="x">↻ X 90°</button>
     <button data-rot="y">↻ Y 90°</button>
@@ -610,14 +612,18 @@ function weldFast(g, eps) {
   const table = new Int32Array(size).fill(-1), mask = size - 1;
   const remap = new Uint32Array(n), keep = [];
   const inv = 1 / eps;
+  // Textuur-naden behouden: alleen samenvoegen als ook de UV gelijk is
+  const uv = g.attributes.uv ? g.attributes.uv.array : null, uq = 1e5;
   for (let i = 0; i < n; i++) {
     const x = Math.round(p[i * 3] * inv), y = Math.round(p[i * 3 + 1] * inv), z = Math.round(p[i * 3 + 2] * inv);
-    let h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) & mask;
+    const u = uv ? Math.round(uv[i * 2] * uq) : 0, w = uv ? Math.round(uv[i * 2 + 1] * uq) : 0;
+    let h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ (u * 2654435761) ^ (w * 40503)) & mask;
     for (;;) {
       const j = table[h];
       if (j < 0) { table[h] = keep.length; remap[i] = keep.length; keep.push(i); break; }
       const k = keep[j];
-      if (Math.round(p[k * 3] * inv) === x && Math.round(p[k * 3 + 1] * inv) === y && Math.round(p[k * 3 + 2] * inv) === z) { remap[i] = j; break; }
+      if (Math.round(p[k * 3] * inv) === x && Math.round(p[k * 3 + 1] * inv) === y && Math.round(p[k * 3 + 2] * inv) === z &&
+          (!uv || (Math.round(uv[k * 2] * uq) === u && Math.round(uv[k * 2 + 1] * uq) === w))) { remap[i] = j; break; }
       h = (h + 1) & mask;
     }
   }
@@ -670,7 +676,7 @@ async function decimateObject(obj, targetTotal) {
     if (!ng.attributes.uv && m.material && m.material.map) { m.material = m.material.clone(); m.material.map = null; }
     // Facetten tonen: elk vlak zijn eigen schaduw, zodat de hoeken zichtbaar zijn
     if (m.material && 'flatShading' in m.material) {
-      if (!m.material.userData.flatCopy) { m.material = m.material.clone(); m.material.userData.flatCopy = true; }
+      if (!m.material.userData.flatCopy) { const old = m.material; m.material = old.clone(); m.material.userData.flatCopy = true; if (typeof texInfo !== 'undefined' && texInfo.has(old)) texInfo.set(m.material, texInfo.get(old)); }
       m.material.flatShading = true;
       m.material.needsUpdate = true;
     }
@@ -755,6 +761,57 @@ flipBtn.onclick = () => {
   shownDensity = -1;
   buildHulls();
   applyMode();
+};
+
+// ---------- Textuur: aan/uit, of zelf een afbeelding kiezen ----------
+let texOn = true;
+const texInfo = new WeakMap();   // materiaal → { map, color } (niet in userData: die wordt bij klonen als tekst gekopieerd)
+const texBtn = document.getElementById('texBtn');
+const texFile = document.getElementById('texFile');
+function modelMats() {
+  const out = [];
+  if (model) model.traverse(c => { if (c.isMesh && c.userData.orig) (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(m => out.push({ mesh: c, mat: m })); });
+  return out;
+}
+function hasTexture() { return modelMats().some(({ mat }) => texInfo.has(mat) || mat.map); }
+function applyTexture() {
+  for (const { mat } of modelMats()) {
+    if (mat.map && !texInfo.has(mat)) texInfo.set(mat, { map: mat.map, color: mat.color ? mat.color.clone() : null });
+    const ti = texInfo.get(mat);
+    if (!ti) continue;
+    mat.map = texOn ? ti.map : null;
+    if (mat.color && ti.color) mat.color.copy(texOn ? ti.color : new THREE.Color(0xcccccc));
+    mat.needsUpdate = true;
+  }
+  texBtn.classList.toggle('on', texOn && hasTexture());
+}
+texBtn.onclick = () => {
+  if (!model) return fail('Open eerst een model.');
+  if (!hasTexture()) { texFile.click(); return; }   // geen textuur in het bestand: zelf een afbeelding kiezen
+  texOn = !texOn;
+  if (texOn && !show.solid) { show.solid = true; applyMode(); }
+  applyTexture();
+};
+texFile.onchange = e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f || !model) return;
+  const meshes = []; model.traverse(c => { if (c.isMesh && c.userData.orig) meshes.push(c); });
+  if (!meshes.some(m => m.geometry.attributes.uv)) return fail('Dit model heeft geen textuur-coördinaten (UV), dus een afbeelding kan er niet op. Exporteer het model mét textuur, bijvoorbeeld als GLB of als ZIP met OBJ + MTL + afbeelding.');
+  const url = URL.createObjectURL(f);
+  new THREE.TextureLoader().load(url, tex => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.flipY = true;
+    for (const m of meshes) {
+      if (!m.geometry.attributes.uv) continue;
+      let mat = Array.isArray(m.userData.orig) ? m.userData.orig[0] : m.userData.orig;
+      if (mat === matDefault || !('map' in mat)) { mat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0, side: matDefault.side }); m.userData.orig = mat; }
+      texInfo.set(mat, { map: tex, color: new THREE.Color(0xffffff) });
+    }
+    texOn = true;
+    show.solid = true;
+    applyMode();
+    applyTexture();
+  }, undefined, () => fail('De afbeelding kon niet geladen worden.'));
 };
 
 const decPanel = document.getElementById('decPanel');
@@ -910,6 +967,7 @@ function setModelNow(obj, name) {
   orient.add(model);
   resetOrientation();
   applySides();
+  applyTexture();
   flipBtn.classList.toggle('on', !!model.userData.flipped);
   buildHulls();
   applyMode();

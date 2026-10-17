@@ -83,7 +83,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 007 · 17 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 008 · 17 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -92,7 +92,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 007 · 17 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 008 · 17 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -124,6 +124,9 @@
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
     <button id="texBtn">🖼 Textuur</button>
+    <button id="texFx">⇆ Tex X</button>
+    <button id="texFy">⇅ Tex Y</button>
+    <button id="texRot">↻ Tex 0°</button>
     <button id="colBtn">🎨 Std</button>
     <button id="dblBtn">◐ Dubbel</button>
     <button id="flipBtn">⇅ Flip</button>
@@ -814,7 +817,43 @@ function applyTexture() {
     mat.needsUpdate = true;
   }
   texBtn.classList.toggle('on', texOn && hasTexture());
+  applyTexTransform();
 }
+
+// ---------- Textuur spiegelen (X/Y) en draaien in stappen van 90° ----------
+const texT = { fx: false, fy: false, rot: 0 };
+const TEX_SLOTS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'bumpMap', 'alphaMap'];
+function applyTexTransform() {
+  const seen = new Set();
+  const fix = t => {
+    if (!t || !t.isTexture || seen.has(t)) return;
+    seen.add(t);
+    t.center.set(0.5, 0.5);
+    t.repeat.set(texT.fx ? -1 : 1, texT.fy ? -1 : 1);
+    t.rotation = texT.rot * Math.PI / 2;
+    t.updateMatrix();
+  };
+  for (const { mat } of modelMats()) {
+    TEX_SLOTS.forEach(k => fix(mat[k]));
+    const ti = texInfo.get(mat);
+    if (ti) fix(ti.map);
+  }
+  document.getElementById('texFx').classList.toggle('on', texT.fx);
+  document.getElementById('texFy').classList.toggle('on', texT.fy);
+  const rb = document.getElementById('texRot');
+  rb.textContent = '↻ Tex ' + texT.rot * 90 + '°';
+  rb.classList.toggle('on', texT.rot !== 0);
+}
+function texCheck() {
+  if (!model) { fail('Open eerst een model.'); return false; }
+  if (!hasTexture()) { fail('Dit model heeft geen textuur. Kies eerst een afbeelding met 🖼 Textuur.'); return false; }
+  if (!texOn) { texOn = true; applyTexture(); }
+  if (!show.solid) { show.solid = true; applyMode(); }
+  return true;
+}
+document.getElementById('texFx').onclick = () => { if (texCheck()) { texT.fx = !texT.fx; applyTexTransform(); } };
+document.getElementById('texFy').onclick = () => { if (texCheck()) { texT.fy = !texT.fy; applyTexTransform(); } };
+document.getElementById('texRot').onclick = () => { if (texCheck()) { texT.rot = (texT.rot + 1) % 4; applyTexTransform(); } };
 texBtn.onclick = () => {
   if (!model) return fail('Open eerst een model.');
   if (!hasTexture()) { texFile.click(); return; }   // geen textuur in het bestand: zelf een afbeelding kiezen
@@ -997,6 +1036,7 @@ function setModelNow(obj, name) {
   orient.add(model);
   applySavedOrientation();
   applySides();
+  texT.fx = texT.fy = false; texT.rot = 0;
   applyTexture();
   flipBtn.classList.toggle('on', !!model.userData.flipped);
   buildHulls();

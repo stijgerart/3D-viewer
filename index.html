@@ -13,6 +13,7 @@
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;overflow:hidden;background:#1e1f24;font-family:system-ui,sans-serif;color:#eee;overscroll-behavior:none}
+  html,body,button,label,input,select{touch-action:manipulation}
   canvas{display:block;touch-action:none}
   #top{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;z-index:2;background:linear-gradient(#1e1f24ee,#1e1f2400)}
   #driveBtn{white-space:nowrap}
@@ -82,7 +83,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 006 · 16 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 007 · 17 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -91,7 +92,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 006 · 16 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 007 · 17 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -393,12 +394,30 @@ function updateFloor() {
     if (mirrorGroup.scale.x < 0) { axis.x = -axis.x; d = -d; }   // gespiegeld: as en richting omkeren
     orient.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, d));
   });
-  const end = e => { pts.delete(e.pointerId); lastAng = pts.size === 2 ? ang() : null; if (pts.size === 0 && model) updateFloor(); };
+  const end = e => { pts.delete(e.pointerId); lastAng = pts.size === 2 ? ang() : null; if (pts.size === 0 && model) { updateFloor(); saveOrientation(); } };
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
 })();
 
 const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+// Stand van Meshy-modellen onthouden: één keer rechtzetten, daarna komen ze vanzelf goed binnen
+let sourceName = '';
+function orientKey() { return /meshy/i.test(sourceName + ' ' + (currentName || '')) ? 'orient-meshy' : null; }
+function saveOrientation() {
+  const k = orientKey(); if (!k || !model) return;
+  try { localStorage.setItem(k, JSON.stringify({ q: orient.quaternion.toArray(), m: mirrorGroup.scale.x })); } catch (e) {}
+}
+function applySavedOrientation() {
+  resetOrientation(false);
+  const k = orientKey(); if (!k) return;
+  try {
+    const o = JSON.parse(localStorage.getItem(k) || 'null');
+    if (!o) return;
+    orient.quaternion.fromArray(o.q);
+    if (o.m < 0) { mirrorGroup.scale.x = -1; document.getElementById('mirror').classList.add('on'); }
+    updateFloor();
+  } catch (e) {}
+}
 function rotateModel(axis) {
   orient.rotateOnWorldAxis(AXES[axis], Math.PI / 2);
   // Afronden om kleine rekenfouten na veel draaien te voorkomen
@@ -408,17 +427,20 @@ function rotateModel(axis) {
     Math.round(orient.rotation.z / (Math.PI / 2)) * (Math.PI / 2)
   );
   updateFloor();
+  saveOrientation();
 }
 function mirrorModel() {
   mirrorGroup.scale.x *= -1;
   document.getElementById('mirror').classList.toggle('on', mirrorGroup.scale.x < 0);
   updateFloor();
+  saveOrientation();
 }
-function resetOrientation() {
+function resetOrientation(save = true) {
   orient.rotation.set(0, 0, 0);
   mirrorGroup.scale.set(1, 1, 1);
   document.getElementById('mirror').classList.remove('on');
   updateFloor();
+  if (save) saveOrientation();
 }
 
 const matDefault = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0.1, side: THREE.DoubleSide });
@@ -547,6 +569,7 @@ async function loadDrive() {
 document.getElementById('driveBtn').onclick = loadDrive;
 
 function loadFile(file) {
+  sourceName = file.name;
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'zip') return loadZip(file);
   if (['ztl', 'zpr', 'zbr'].includes(ext)) return fail('ZBrush-bestanden (.' + ext + ') kunnen niet in een browser geopend worden.\n\nExporteer in ZBrush als FBX (Zplugin > FBX ExportImport) of OBJ en open dat bestand. Bij FBX blijven je subtools als groepen behouden.');
@@ -972,7 +995,7 @@ function setModelNow(obj, name) {
   model.position.copy(center).multiplyScalar(-s);
 
   orient.add(model);
-  resetOrientation();
+  applySavedOrientation();
   applySides();
   applyTexture();
   flipBtn.classList.toggle('on', !!model.userData.flipped);
@@ -1103,7 +1126,7 @@ document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
 document.querySelectorAll('[data-rot]').forEach(b => b.onclick = () => rotateModel(b.dataset.rot));
 document.getElementById('mirror').onclick = mirrorModel;
-document.getElementById('resetRot').onclick = resetOrientation;
+document.getElementById('resetRot').onclick = () => resetOrientation();
 const spinBtn = document.getElementById('spin');
 spinBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; spinBtn.classList.toggle('on', controls.autoRotate); };
 document.getElementById('file').onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; };
@@ -1120,6 +1143,7 @@ addEventListener('drop', e => {
 
 // Voorkom dat de pagina zelf gaat zoomen op iPhone
 document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;

@@ -83,7 +83,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 010 · 19 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 011 · 19 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -92,7 +92,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 010 · 19 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 011 · 19 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -181,6 +181,44 @@ import { USDZExporter } from 'three/addons/exporters/USDZExporter.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+
+// Echte vlakken-mesh (dikke lijnen zijn technisch ook een Mesh, die tellen hier niet mee)
+const isM = o => !!o && o.isMesh === true && !o.isLineSegments2;
+
+// ---------- Dikke lijnen (DXF- en Rhino-curves) ----------
+const LINE_PX = 2.5;                 // dikte in schermpunten
+const plainOf = new WeakMap(), thickOf = new WeakMap();
+const _lineRes = new THREE.Vector2();
+function makeThickLines(arr, color) {
+  const g = new LineSegmentsGeometry();
+  g.setPositions(arr);
+  const m = new LineMaterial({ color, linewidth: LINE_PX, worldUnits: false });
+  const ln = new LineSegments2(g, m);
+  ln.userData.dxfLine = true;
+  ln.onBeforeRender = r => { r.getDrawingBufferSize(_lineRes); m.resolution.copy(_lineRes); m.linewidth = LINE_PX * r.getPixelRatio(); };
+  // dunne kopie voor opslaan (OBJ/GLB)
+  const pg = new THREE.BufferGeometry();
+  pg.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  const plain = new THREE.LineSegments(pg, new THREE.LineBasicMaterial({ color }));
+  plain.userData.dxfLine = true;
+  plainOf.set(ln, plain); thickOf.set(plain, ln);
+  return ln;
+}
+// Bij opslaan dikke lijnen tijdelijk vervangen door gewone lijnen (en daarna terug)
+function swapThickLines(toPlain) {
+  if (!model) return;
+  const list = [];
+  model.traverse(c => { if (toPlain ? c.isLineSegments2 : thickOf.has(c)) list.push(c); });
+  for (const c of list) {
+    const other = toPlain ? plainOf.get(c) : thickOf.get(c);
+    if (!other || !c.parent) continue;
+    other.visible = c.visible;
+    const p = c.parent; p.remove(c); p.add(other);
+  }
+}
 
 // ---------- Rhino 3DM: bibliotheek zit ingebouwd in deze pagina ----------
 let rhinoPromise = null;
@@ -206,7 +244,45 @@ async function load3dm(buffer) {
   const T = rhino.ObjectType;
   const group = new THREE.Group();
   const jsonLoader = new THREE.BufferGeometryLoader();
-  const stats = { shown: 0, noMesh: 0 };
+  const stats = { shown: 0, noMesh: 0, curves: 0 };
+
+  // Kleuren van lagen/objecten (te donker → lichtgrijs, anders onzichtbaar op de donkere achtergrond)
+  const layerCols = [];
+  try { const lt = doc.layers(); for (let k = 0; k < lt.count; k++) { const c = lt.get(k).color; layerCols[k] = (c.r << 16) | (c.g << 8) | c.b; } } catch (e) {}
+  const lighten = c => ((0.299 * (c >> 16 & 255) + 0.587 * (c >> 8 & 255) + 0.114 * (c & 255)) < 70 ? 0xdddddd : c);
+  const colorFor = a => {
+    let c;
+    try {
+      if (a.colorSource === rhino.ObjectColorSource.ColorFromObject) { const oc = a.objectColor; c = (oc.r << 16) | (oc.g << 8) | oc.b; }
+      else c = layerCols[a.layerIndex];
+    } catch (e) {}
+    return lighten(c === undefined ? 0xdddddd : c);
+  };
+
+  // Curves per onderdeel en kleur verzamelen
+  const curveBuf = new Map();
+  const cv = new THREE.Vector3();
+  const addCurve = (crv, target, matrix, col) => {
+    let P = null;
+    try { const pl = crv.tryGetPolyline(); if (pl && pl.count > 1) { P = []; for (let i = 0; i < pl.count; i++) P.push(pl.get(i)); } } catch (e) {}
+    if (!P && crv.degree === 1 && crv.points) {
+      try { const cp = crv.points(); if (cp.count > 1) { P = []; for (let i = 0; i < cp.count; i++) P.push(cp.get(i)); } } catch (e) {}
+    }
+    if (!P) {
+      const [t0, t1] = crv.domain;
+      const n = Math.min(600, Math.max(32, (crv.spanCount || 1) * 16));
+      P = [];
+      for (let i = 0; i <= n; i++) P.push(crv.pointAt(t0 + (t1 - t0) * i / n));
+    }
+    if (P.length < 2) return;
+    if (!curveBuf.has(target)) curveBuf.set(target, new Map());
+    const byCol = curveBuf.get(target);
+    if (!byCol.has(col)) byCol.set(col, []);
+    const arr = byCol.get(col);
+    const W = P.map(p => { cv.set(p[0], p[1], p[2]); if (matrix) cv.applyMatrix4(matrix); return [cv.x, cv.y, cv.z]; });
+    for (let i = 0; i + 1 < W.length; i++) arr.push(W[i][0], W[i][1], W[i][2], W[i + 1][0], W[i + 1][1], W[i + 1][2]);
+    stats.shown++; stats.curves++;
+  };
 
   // Groepen en lagen
   const groupNames = [], layerNames = [];
@@ -277,6 +353,8 @@ async function load3dm(buffer) {
     } else if (t === T.SubD) {
       if (geo.subdivide) geo.subdivide(2);
       if (!rhino.Mesh.createFromSubDControlNet || !addMesh(rhino.Mesh.createFromSubDControlNet(geo, false), target, matrix)) stats.noMesh++;
+    } else if (t === T.Curve) {
+      addCurve(geo, target, matrix, colorFor(o.attributes()));
     } else if (t === T.InstanceReference) {
       // Blok: onderdelen ophalen en op de juiste plek zetten
       const ids = idefs.get(geo.parentIdefId);
@@ -298,6 +376,8 @@ async function load3dm(buffer) {
     } catch (e) { console.warn('Object overgeslagen:', e); }
   }
 
+  for (const [target, byCol] of curveBuf) for (const [col, arr] of byCol) target.add(makeThickLines(new Float32Array(arr), col));
+
   if (!stats.shown) {
     throw new Error(stats.noMesh
       ? `Dit bestand bevat ${stats.noMesh} NURBS-object(en) zonder opgeslagen weergave-mesh.\n\nOplossing in Rhino: typ de opdracht RefreshShade (of zet een viewport op Shaded), en kies daarna gewoon Opslaan (niet "Save Small").`
@@ -307,7 +387,7 @@ async function load3dm(buffer) {
   group.rotation.x = -Math.PI / 2;   // Rhino is Z-omhoog
   const wrap = new THREE.Group();
   wrap.add(group);
-  wrap.userData.note = stats.noMesh ? ` · ${stats.noMesh} object(en) zonder mesh overgeslagen` : '';
+  wrap.userData.note = (stats.curves ? ` · ${stats.curves} curve(s)` : '') + (stats.noMesh ? ` · ${stats.noMesh} object(en) zonder mesh overgeslagen` : '');
   return wrap;
 }
 
@@ -632,7 +712,7 @@ function getSimplifier() {
 }
 function countTris(obj) {
   let n = 0;
-  obj.traverse(c => { if (c.isMesh) { const g = c.geometry; n += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
+  obj.traverse(c => { if (isM(c)) { const g = c.geometry; n += (g.index ? g.index.count : g.attributes.position.count) / 3; } });
   return Math.round(n);
 }
 function plainFloat(a) {
@@ -700,7 +780,7 @@ async function decimateObject(obj, targetTotal) {
   if (total <= targetTotal) return total;
   const simp = await getSimplifier();
   const meshes = [];
-  obj.traverse(c => { if (c.isMesh) meshes.push(c); });
+  obj.traverse(c => { if (isM(c)) meshes.push(c); });
   for (const m of meshes) {
     const g = m.geometry;
     const n = (g.index ? g.index.count : g.attributes.position.count) / 3;
@@ -1009,11 +1089,7 @@ function parseDXF(text, THREE, matFace) {
       nTris += b.tris.length / 9;
     }
     for (const [col, arr] of b.lines) {
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(f32(arr), 3));
-      const ln = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: col }));
-      ln.userData.dxfLine = true;
-      g.add(ln);
+      g.add(makeThickLines(f32(arr), col));
       nSeg += arr.length / 6;
     }
     root.add(g);
@@ -1046,7 +1122,7 @@ function setModel(obj, name) {
 // Opnieuw opbouwen na handmatig verkleinen
 function stripHelpers(obj) {
   obj.traverse(c => {
-    if (!c.isMesh) return;
+    if (!isM(c)) return;
     for (const k of ['edges', 'wire']) { const h = c.userData[k]; if (h) { c.remove(h); h.geometry.dispose(); } delete c.userData[k]; }
     if (c.userData.wireCache) { Object.values(c.userData.wireCache).forEach(g => g.dispose()); delete c.userData.wireCache; }
     if (c.userData.orig) c.material = c.userData.orig;
@@ -1062,7 +1138,7 @@ function applySides() {
   dblBtn.classList.toggle('on', doubleSided);
   if (!model) return;
   model.traverse(c => {
-    if (!c.isMesh || !c.userData.orig) return;
+    if (!isM(c) || !c.userData.orig) return;
     (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(mt => {
       if (mt === matDefault) return;
       if (mt.userData.origSide === undefined) mt.userData.origSide = mt.side;
@@ -1096,7 +1172,7 @@ function flipGeometry(g) {
 flipBtn.onclick = () => {
   if (!model) return fail('Open eerst een model.');
   model.traverse(c => {
-    if (!c.isMesh) return;
+    if (!isM(c)) return;
     flipGeometry(c.geometry);
     if (c.userData.wireCache) { Object.values(c.userData.wireCache).forEach(w => w.dispose()); c.userData.wireCache = {}; }
   });
@@ -1114,7 +1190,7 @@ const texBtn = document.getElementById('texBtn');
 const texFile = document.getElementById('texFile');
 function modelMats() {
   const out = [];
-  if (model) model.traverse(c => { if (c.isMesh && c.userData.orig) (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(m => out.push({ mesh: c, mat: m })); });
+  if (model) model.traverse(c => { if (isM(c) && c.userData.orig) (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(m => out.push({ mesh: c, mat: m })); });
   return out;
 }
 function hasTexture() { return modelMats().some(({ mat }) => texInfo.has(mat) || mat.map); }
@@ -1175,7 +1251,7 @@ texBtn.onclick = () => {
 texFile.onchange = e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f || !model) return;
-  const meshes = []; model.traverse(c => { if (c.isMesh && c.userData.orig) meshes.push(c); });
+  const meshes = []; model.traverse(c => { if (isM(c) && c.userData.orig) meshes.push(c); });
   if (!meshes.some(m => m.geometry.attributes.uv)) return fail('Dit model heeft geen textuur-coördinaten (UV), dus een afbeelding kan er niet op. Exporteer het model mét textuur, bijvoorbeeld als GLB of als ZIP met OBJ + MTL + afbeelding.');
   const url = URL.createObjectURL(f);
   new THREE.TextureLoader().load(url, tex => {
@@ -1278,14 +1354,16 @@ document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.onclick = () => {
   busy.textContent = 'Opslaan…';
   const oldShow = { ...show };
   show.solid = true; applyMode();
+  swapThickLines(true);
   // Hulplijnen tijdelijk weg, originele maat (geen schermschaal)
-  model.traverse(c => { if (c.isMesh) { c.userData._helpers = [c.userData.edges, c.userData.wire].filter(Boolean); c.userData._helpers.forEach(h => c.remove(h)); } });
+  model.traverse(c => { if (isM(c)) { c.userData._helpers = [c.userData.edges, c.userData.wire].filter(Boolean); c.userData._helpers.forEach(h => c.remove(h)); } });
   const sc = model.scale.clone(), pos = model.position.clone();
   model.scale.set(1, 1, 1); model.position.set(0, 0, 0);
   model.updateMatrixWorld(true);
   const restore = () => {
     model.scale.copy(sc); model.position.copy(pos);
-    model.traverse(c => { if (c.isMesh && c.userData._helpers) { c.userData._helpers.forEach(h => c.add(h)); delete c.userData._helpers; } });
+    model.traverse(c => { if (isM(c) && c.userData._helpers) { c.userData._helpers.forEach(h => c.add(h)); delete c.userData._helpers; } });
+    swapThickLines(false);
     Object.assign(show, oldShow); applyMode();
     busy.style.display = 'none'; busy.textContent = 'Laden…';
   };
@@ -1317,7 +1395,7 @@ function setModelNow(obj, name) {
   document.getElementById('arBtn').style.display = 'block';
 
   const meshes = [];
-  model.traverse(c => { if (c.isMesh) meshes.push(c); });
+  model.traverse(c => { if (isM(c)) meshes.push(c); });
 
   let tris = 0;
   for (const m of meshes) {
@@ -1366,12 +1444,12 @@ const partsBtn = document.getElementById('partsBtn');
 const panel = document.getElementById('panel');
 const partList = document.getElementById('partList');
 
-function hasMesh(o) { let f = false; o.traverse(c => { if (c.isMesh || c.userData.dxfLine) f = true; }); return f; }
+function hasMesh(o) { let f = false; o.traverse(c => { if (isM(c) || c.userData.dxfLine) f = true; }); return f; }
 
 function findParts(root) {
   let node = root;
   // Door enkelvoudige 'wrapper'-nodes heen zakken
-  while (node.children.length === 1 && !node.children[0].isMesh) node = node.children[0];
+  while (node.children.length === 1 && !isM(node.children[0])) node = node.children[0];
   return node.children.filter(hasMesh).map((c, i) => ({ name: c.name || `Deel ${i + 1}`, obj: c }));
 }
 
@@ -1422,7 +1500,7 @@ function applyMode() {
   const showWire = show.wire;
   if (!model) return;
   model.traverse(c => {
-    if (!c.isMesh) return;
+    if (!isM(c)) return;
     c.material = mode === 'solid' ? c.userData.orig : matFill;
     c.userData.edges.visible = false;   // outline gaat nu via de silhouetrand
     c.userData.wire.visible = showWire;
@@ -1447,7 +1525,7 @@ function applyLineDensity() {
   busy.style.display = 'flex';
   setTimeout(() => {
     model.traverse(c => {
-      if (!c.isMesh || !c.userData.wire) return;
+      if (!isM(c) || !c.userData.wire) return;
       const cache = c.userData.wireCache || (c.userData.wireCache = {});
       if (!cache[lvl]) cache[lvl] = lvl === 0
         ? new THREE.WireframeGeometry(c.geometry)
@@ -1522,7 +1600,7 @@ function collectMesh() {
   mirrorGroup.updateMatrixWorld(true);
   const parts = []; let nv = 0, ni = 0;
   model.traverse(c => {
-    if (!c.isMesh) return;
+    if (!isM(c)) return;
     let vis = c.visible; c.traverseAncestors(a => { if (!a.visible) vis = false; });
     if (!vis) return;
     const p = c.geometry.attributes.position, I = c.geometry.index;
@@ -1809,7 +1887,7 @@ function buildHulls() {
   hulls = [];
   if (!model) return;
   model.traverse(c => {
-    if (!c.isMesh || c.isSkinnedMesh) return;
+    if (!isM(c) || c.isSkinnedMesh) return;
     try { smoothOutlineNormals(c.geometry); } catch (e) { return; }
     const h = new THREE.Mesh(c.geometry, matOutline);
     h.matrixAutoUpdate = false;

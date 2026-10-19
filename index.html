@@ -83,7 +83,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 012 · 19 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 013 · 19 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -92,7 +92,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 012 · 19 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 013 · 19 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -137,6 +137,7 @@
     <button data-view="front">Voor</button>
     <button data-view="side">Zij</button>
     <button data-view="top">Boven</button>
+    <button id="centerBtn">⌖ Midden</button>
     <button id="spin">Draai</button>
     <button data-rot="x">↻ X 90°</button>
     <button data-rot="y">↻ Y 90°</button>
@@ -1538,6 +1539,44 @@ function applyLineDensity() {
     busy.style.display = 'none';
   }, 30);
 }
+
+// Model (alleen zichtbare delen) in het midden van het beeld zetten, passend op het scherm
+function centerModel() {
+  if (!model) return fail('Open eerst een model.');
+  mirrorGroup.updateMatrixWorld(true);
+  const box = new THREE.Box3(), tmp = new THREE.Box3();
+  model.traverse(c => {
+    if (!(isM(c) || c.userData.dxfLine) || !isShown(c)) return;
+    const g = c.geometry;
+    if (!g) return;
+    if (!g.boundingBox) g.computeBoundingBox();
+    if (g.boundingBox.isEmpty()) return;
+    tmp.copy(g.boundingBox).applyMatrix4(c.matrixWorld);
+    box.union(tmp);
+  });
+  if (box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3);
+  const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
+  const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+  const dist = r / Math.sin(Math.min(vHalf, hHalf)) * 1.05;
+  const dir = camera.position.clone().sub(controls.target);
+  if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
+  dir.normalize();
+  // korte, vloeiende beweging
+  const fromT = controls.target.clone(), fromP = camera.position.clone();
+  const toT = center, toP = center.clone().addScaledVector(dir, dist);
+  const t0 = performance.now(), DUR = 350;
+  const step = () => {
+    const k = Math.min(1, (performance.now() - t0) / DUR), e = k * (2 - k);
+    controls.target.lerpVectors(fromT, toT, e);
+    camera.position.lerpVectors(fromP, toP, e);
+    controls.update();
+    if (k < 1) requestAnimationFrame(step);
+  };
+  step();
+}
+document.getElementById('centerBtn').onclick = centerModel;
 
 function setView(v) {
   // Op een smal (staand) scherm iets verder weg, zodat het object past

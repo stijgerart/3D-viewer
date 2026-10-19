@@ -83,7 +83,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 011 · 19 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 012 · 19 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -92,7 +92,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 011 · 19 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 012 · 19 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -191,11 +191,13 @@ const isM = o => !!o && o.isMesh === true && !o.isLineSegments2;
 // ---------- Dikke lijnen (DXF- en Rhino-curves) ----------
 const LINE_PX = 2.5;                 // dikte in schermpunten
 const plainOf = new WeakMap(), thickOf = new WeakMap();
+let thickMats = [];   // dikke lijnen van het huidige model (doen mee met de lijnkleur-knop)
 const _lineRes = new THREE.Vector2();
 function makeThickLines(arr, color) {
   const g = new LineSegmentsGeometry();
   g.setPositions(arr);
   const m = new LineMaterial({ color, linewidth: LINE_PX, worldUnits: false });
+  m.userData.base = new THREE.Color(color);   // eigen kleur, voor 🎨 Std
   const ln = new LineSegments2(g, m);
   ln.userData.dxfLine = true;
   ln.onBeforeRender = r => { r.getDrawingBufferSize(_lineRes); m.resolution.copy(_lineRes); m.linewidth = LINE_PX * r.getPixelRatio(); };
@@ -1423,6 +1425,7 @@ function setModelNow(obj, name) {
   model.position.copy(center).multiplyScalar(-s);
 
   orient.add(model);
+  thickMats = []; model.traverse(c => { if (c.isLineSegments2) thickMats.push(c.material); });
   applySavedOrientation();
   applySides();
   texT.fx = texT.fy = false; texT.rot = 0;
@@ -1923,6 +1926,7 @@ function syncLineColors(t) {
   if (lineCol === 'std') {
     matOutline.uniforms.uColor.value.copy(defCols.outline);
     matWire.color.copy(defCols.wire); matWireBlack.color.copy(defCols.wireBlack);
+    for (const m of thickMats) m.color.copy(m.userData.base);
     return;
   }
   // fade: langzaam en vloeiend van zwart naar wit en terug (heen en weer in 4 seconden)
@@ -1931,6 +1935,7 @@ function syncLineColors(t) {
   tmpCol.setRGB(v, v, v);
   matOutline.uniforms.uColor.value.copy(tmpCol);
   matWire.color.copy(tmpCol); matWireBlack.color.copy(tmpCol);
+  for (const m of thickMats) m.color.copy(tmpCol);
 }
 
 renderer.setAnimationLoop((t) => {

@@ -57,6 +57,8 @@
   body.hideui #top{opacity:0;transform:translateY(-100%);pointer-events:none}
   body.hideui #bottom{opacity:0;transform:translateY(100%);pointer-events:none}
   #arBtn{display:none;white-space:nowrap}
+  #centerFab{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom) + 132px);z-index:2;display:none;border-radius:24px;padding:10px 16px;min-height:44px;font-size:15px;background:#2e3038ee;box-shadow:0 2px 8px #0006;transition:opacity .25s}
+  body.hideui #centerFab{opacity:0;pointer-events:none}
   #arPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #arPanel .arRow{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:16px;font-weight:600}
   #arHeight{width:110px;font-size:18px;padding:10px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#fff;text-align:center}
@@ -83,7 +85,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 014 · 19 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 015 · 19 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -92,7 +94,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 014 · 19 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 015 · 19 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -118,6 +120,7 @@
   <div id="saveInfo">Daarna kies je zelf waar het bestand komt: Bestanden, Dropbox, Google Drive…</div>
 </div>
 <video id="camVideo" playsinline muted autoplay></video>
+<button id="centerFab" aria-label="Model in het midden zetten">⌖ Midden</button>
 <div id="bottom">
   <div class="row srow">
     <button data-mode="solid" class="on">Solid</button>
@@ -1439,6 +1442,7 @@ function setModelNow(obj, name) {
   }
   model = obj;
   document.getElementById('arBtn').style.display = 'block';
+  document.getElementById('centerFab').style.display = 'block';
 
   const meshes = [];
   model.traverse(c => { if (isM(c)) meshes.push(c); });
@@ -1620,6 +1624,7 @@ function centerModel() {
   step();
 }
 document.getElementById('centerBtn').onclick = centerModel;
+document.getElementById('centerFab').onclick = centerModel;
 
 function setView(v) {
   // Op een smal (staand) scherm iets verder weg, zodat het object past

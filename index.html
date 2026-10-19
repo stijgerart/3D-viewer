@@ -83,7 +83,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 013 · 19 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 014 · 19 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -92,7 +92,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 013 · 19 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 014 · 19 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -247,7 +247,7 @@ async function load3dm(buffer) {
   const T = rhino.ObjectType;
   const group = new THREE.Group();
   const jsonLoader = new THREE.BufferGeometryLoader();
-  const stats = { shown: 0, noMesh: 0, curves: 0 };
+  const stats = { shown: 0, noMesh: 0, curves: 0, transparent: 0 };
 
   // Kleuren van lagen/objecten (te donker → lichtgrijs, anders onzichtbaar op de donkere achtergrond)
   const layerCols = [];
@@ -260,6 +260,45 @@ async function load3dm(buffer) {
       else c = layerCols[a.layerIndex];
     } catch (e) {}
     return lighten(c === undefined ? 0xdddddd : c);
+  };
+
+  // Materialen uit Rhino (kleur en transparantie), per object, laag of blok
+  const rMats = (() => { try { return doc.materials(); } catch (e) { return null; } })();
+  const layerMat = [];
+  try { const lt = doc.layers(); for (let k = 0; k < lt.count; k++) layerMat[k] = lt.get(k).renderMaterialIndex; } catch (e) {}
+  const matCache = new Map();
+  const srgb = (c, scale) => new THREE.Color().setRGB(c.r / scale, c.g / scale, c.b / scale, THREE.SRGBColorSpace);
+  const toThreeMat = idx => {
+    if (!rMats || idx == null || idx < 0 || idx >= rMats.count) return null;
+    if (matCache.has(idx)) return matCache.get(idx);
+    let mat = null;
+    try {
+      const rm = rMats.get(idx);
+      let col = null, opacity = 1, rough = 0.6, metal = 0.1;
+      try {
+        const pb = rm.physicallyBased();
+        if (pb && pb.supported) {
+          const c = pb.baseColor;
+          col = srgb(c, Math.max(c.r, c.g, c.b) > 1 ? 255 : 1);
+          opacity = pb.opacity; rough = pb.roughness; metal = pb.metallic;
+        }
+      } catch (e) {}
+      if (!col) { col = srgb(rm.diffuseColor, 255); opacity = 1 - (rm.transparency || 0); }
+      opacity = Math.min(1, Math.max(0.05, isFinite(opacity) ? opacity : 1));
+      mat = new THREE.MeshStandardMaterial({ color: col, roughness: isFinite(rough) ? rough : 0.6, metalness: isFinite(metal) ? metal : 0.1, side: THREE.DoubleSide });
+      if (opacity < 0.999) { mat.transparent = true; mat.opacity = opacity; mat.depthWrite = false; stats.transparent++; }
+      mat.name = rm.name || '';
+    } catch (e) { mat = null; }
+    matCache.set(idx, mat);
+    return mat;
+  };
+  const MS = rhino.ObjectMaterialSource;
+  const matIndexFor = (a, parentIdx) => {
+    try {
+      if (a.materialSource === MS.MaterialFromObject) return a.materialIndex;
+      if (a.materialSource === MS.MaterialFromParent && parentIdx != null) return parentIdx;
+      return layerMat[a.layerIndex];
+    } catch (e) { return null; }
   };
 
   // Curves per onderdeel en kleur verzamelen
@@ -320,12 +359,13 @@ async function load3dm(buffer) {
     for (let i = 0; i < it.count; i++) { const d = it.get(i); if (d) idefs.set(d.id, d.getObjectIds()); }
   } catch (e) {}
 
+  let curMat = null;   // materiaal van het object dat nu wordt omgezet
   const addMesh = (m, target, matrix) => {
     if (!m) return false;
     const g = jsonLoader.parse(m.toThreejsJSON());
     if (!g.attributes.position || !g.attributes.position.count) return false;
     if (matrix) g.applyMatrix4(matrix);
-    target.add(new THREE.Mesh(g, matDefault.clone()));
+    target.add(new THREE.Mesh(g, curMat || matDefault.clone()));
     stats.shown++;
     return true;
   };
@@ -340,10 +380,13 @@ async function load3dm(buffer) {
     return got;
   };
 
-  const convert = (o, target, matrix, depth) => {
+  const convert = (o, target, matrix, depth, parentMat) => {
     if (!o || depth > 10) return;
     const geo = o.geometry();
     const t = geo.objectType;
+    let myMat = null;
+    try { myMat = matIndexFor(o.attributes(), parentMat); } catch (e) {}
+    curMat = toThreeMat(myMat);
     if (t === T.Mesh) {
       addMesh(geo, target, matrix);
     } else if (t === T.Brep) {
@@ -364,7 +407,7 @@ async function load3dm(buffer) {
       if (!ids) return;
       const xf = new THREE.Matrix4().set(...geo.xform.toFloatArray(true));
       const m = matrix ? matrix.clone().multiply(xf) : xf;
-      for (const id of ids) convert(byId.get(id), target, m, depth + 1);
+      for (const id of ids) convert(byId.get(id), target, m, depth + 1, myMat);
     }
   };
 
@@ -390,7 +433,7 @@ async function load3dm(buffer) {
   group.rotation.x = -Math.PI / 2;   // Rhino is Z-omhoog
   const wrap = new THREE.Group();
   wrap.add(group);
-  wrap.userData.note = (stats.curves ? ` · ${stats.curves} curve(s)` : '') + (stats.noMesh ? ` · ${stats.noMesh} object(en) zonder mesh overgeslagen` : '');
+  wrap.userData.note = (stats.transparent ? ` · ${stats.transparent} transparant materiaal` : '') + (stats.curves ? ` · ${stats.curves} curve(s)` : '') + (stats.noMesh ? ` · ${stats.noMesh} object(en) zonder mesh overgeslagen` : '');
   return wrap;
 }
 

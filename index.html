@@ -69,12 +69,19 @@
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
   #arLink img{width:1px;height:1px;opacity:0;position:absolute}
-  #decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
+  #colPanel,#decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #decInfo{font-size:17px;font-weight:600}
   .decRow{display:flex;gap:10px}
   #decNum{flex:1;min-width:0;font-size:20px;padding:12px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#fff}
   .decRow .saveBig{flex:none;padding:0 18px}
   #savePanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
+  .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .sw{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:none;padding:4px 0;min-height:0;font-size:13px;color:#ddd}
+  .sw i{display:block;width:52px;height:52px;border-radius:50%;border:2px solid #555;box-shadow:inset 0 -6px 10px #0003}
+  .sw.on{background:none;border:none}
+  .sw.on i{border:3px solid #4a7cff;box-shadow:0 0 0 3px #4a7cff55}
+  .sw.orig i{background:conic-gradient(#d8c49a,#bfe3f2,#9a9690,#b5714a,#d8c49a)}
+  .sw input{position:absolute;opacity:0;width:1px;height:1px}
   .saveBig{background:#4a7cff;border-color:#4a7cff;color:#fff;font-weight:700;font-size:19px;min-height:60px}
   #saveInfo{font-size:15px;opacity:.8;line-height:1.4}
   #splash{position:fixed;inset:0;z-index:50;background:#1e1f24;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;transition:opacity .5s}
@@ -85,7 +92,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 015 · 19 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 016 · 31 okt</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -94,7 +101,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 015 · 19 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 016 · 31 okt</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -105,6 +112,19 @@
   </div>
   <div class="decRow"><input id="arHeight" type="text" inputmode="decimal" value="1"><button class="saveBig" id="arOk">OK</button></div>
   <div id="arInfo"></div>
+</div>
+<div id="colPanel">
+  <div class="phead"><strong>Kleur van het model</strong><button id="colClose">Sluiten</button></div>
+  <div class="swatches">
+    <button class="sw orig" data-col=""><i></i>Origineel</button>
+    <button class="sw" data-col="#d8c49a"><i style="background:#d8c49a"></i>Zand</button>
+    <button class="sw" data-col="#a88d62"><i style="background:#a88d62"></i>Nat zand</button>
+    <button class="sw" data-col="#c6e6f4"><i style="background:#c6e6f4"></i>IJs</button>
+    <button class="sw" data-col="#f5f8fb"><i style="background:#f5f8fb"></i>Sneeuw</button>
+    <button class="sw" data-col="#9a9690"><i style="background:#9a9690"></i>Steen</button>
+    <button class="sw" data-col="#b5714a"><i style="background:#b5714a"></i>Klei</button>
+    <label class="sw" id="swCustom"><i style="background:#4a7cff"></i>Eigen kleur<input id="colCustom" type="color" value="#4a7cff"></label>
+  </div>
 </div>
 <div id="decPanel">
   <div class="phead"><strong>Verkleinen</strong><button id="decClose">Sluiten</button></div>
@@ -126,6 +146,7 @@
     <button data-mode="solid" class="on">Solid</button>
     <button data-mode="outline">Outline</button>
     <button data-mode="wire">Mesh</button>
+    <button id="solidColBtn">🖌 Kleur</button>
     <button id="texBtn">🖼 Textuur</button>
     <button id="texFx">⇆ Tex X</button>
     <button id="texFy">⇅ Tex Y</button>
@@ -1243,6 +1264,41 @@ function modelMats() {
   return out;
 }
 function hasTexture() { return modelMats().some(({ mat }) => texInfo.has(mat) || mat.map); }
+// ---------- Eigen kleur voor het solid model ----------
+let solidCol = null;   // null = originele kleuren
+try { const c = localStorage.getItem('solidCol'); if (c) solidCol = c; } catch (e) {}
+const origCol = new WeakMap();
+function applySolidColor() {
+  const c = solidCol ? new THREE.Color().setStyle(solidCol, THREE.SRGBColorSpace) : null;
+  for (const { mat } of modelMats()) {
+    if (!mat.color || mat === matDefault) continue;
+    const ti = texInfo.get(mat);
+    if (ti && texOn) continue;                       // textuur zichtbaar: die bepaalt de kleur
+    if (!ti && !origCol.has(mat)) origCol.set(mat, mat.color.clone());
+    mat.color.copy(c || (ti ? new THREE.Color(0xcccccc) : origCol.get(mat)));
+  }
+  document.getElementById('solidColBtn').classList.toggle('on', !!solidCol);
+  document.querySelectorAll('#colPanel .sw[data-col]').forEach(b => b.classList.toggle('on', (b.dataset.col || null) === solidCol));
+  document.getElementById('swCustom').classList.toggle('on', !!solidCol && !document.querySelector(`#colPanel .sw[data-col="${solidCol}"]`));
+}
+function setSolidColor(c) {
+  solidCol = c || null;
+  try { solidCol ? localStorage.setItem('solidCol', solidCol) : localStorage.removeItem('solidCol'); } catch (e) {}
+  if (solidCol && texOn && hasTexture()) { texOn = false; applyTexture(); }   // textuur uit, anders zie je de kleur niet
+  if (!show.solid) { show.solid = true; applyMode(); }
+  applySolidColor();
+}
+const colPanel = document.getElementById('colPanel');
+document.getElementById('solidColBtn').onclick = () => {
+  if (!model) return fail('Open eerst een model.');
+  applySolidColor();
+  colPanel.style.display = 'flex';
+};
+document.getElementById('colClose').onclick = () => { colPanel.style.display = 'none'; };
+document.querySelectorAll('#colPanel .sw[data-col]').forEach(b => b.onclick = () => setSolidColor(b.dataset.col));
+const colCustom = document.getElementById('colCustom');
+colCustom.oninput = () => { document.querySelector('#swCustom i').style.background = colCustom.value; setSolidColor(colCustom.value); };
+
 function applyTexture() {
   for (const { mat } of modelMats()) {
     if (mat.map && !texInfo.has(mat)) texInfo.set(mat, { map: mat.map, color: mat.color ? mat.color.clone() : null });
@@ -1254,6 +1310,7 @@ function applyTexture() {
   }
   texBtn.classList.toggle('on', texOn && hasTexture());
   applyTexTransform();
+  applySolidColor();
 }
 
 // ---------- Textuur spiegelen (X/Y) en draaien in stappen van 90° ----------
@@ -1811,7 +1868,7 @@ async function prepareAR() {
     if (mode === 'solid') {
       const g = decimateTo(pos, idx, AR_MAX_TRIS);
       g.computeVertexNormals();
-      group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0 })));
+      group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: solidCol ? new THREE.Color().setStyle(solidCol, THREE.SRGBColorSpace) : 0xcccccc, roughness: 0.6, metalness: 0 })));
       const n = g.index.count / 3;
       msg = n < origTris ? `Origineel ${nf(origTris)} driehoeken → AR ${nf(n)}.` : `${nf(n)} driehoeken, past zonder verkleinen.`;
     } else {

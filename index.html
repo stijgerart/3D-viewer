@@ -92,7 +92,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 016 · 31 okt</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 017 · 2 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="partsBtn">☰ Groepen</button>
@@ -101,7 +101,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 016 · 31 okt</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 017 · 2 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -201,7 +201,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
-import { unzipSync, strFromU8 } from 'three/addons/libs/fflate.module.js';
+import { unzipSync, inflateSync, strFromU8 } from 'three/addons/libs/fflate.module.js';
 import { USDZExporter } from 'three/addons/exporters/USDZExporter.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
@@ -632,19 +632,295 @@ function trace(step) { try { localStorage.setItem('viewerStep', step); } catch (
 // ---------- ZIP openen ----------
 const MODEL_EXTS = ['glb', 'gltf', 'fbx', 'obj', '3dm', 'stl', 'dxf'];
 let zipUrls = [];
+// ---------- Snelle OBJ-lezer: leest direct de bytes (geen tekst/regels in het geheugen) en maakt geïndexeerde geometrie ----------
+// Geeft null terug als het bestand iets bevat wat deze lezer niet doet (bijv. lijnen); dan valt de viewer terug op de gewone lezer.
+function parseOBJFast(u8, materials, defaultMat) {
+  const n = u8.length;
+  const grow = (a, need) => { if (need <= a.length) return a; let s = a.length * 2; while (s < need) s *= 2; const b = new a.constructor(s); b.set(a); return b; };
+  let V = new Float32Array(3 << 16), nv = 0, C = null;
+  let VT = new Float32Array(2 << 16), nt = 0;
+  let VN = new Float32Array(3 << 16), nn = 0;
+  // unieke hoekpunten (v, vt, vn) met een hashtabel
+  let K = new Int32Array(3 << 16), nu = 0;
+  let hsize = 1 << 16, hmask = hsize - 1, H = new Int32Array(hsize).fill(-1);
+  const rehash = () => {
+    hsize <<= 1; hmask = hsize - 1; H = new Int32Array(hsize).fill(-1);
+    for (let u = 0; u < nu; u++) {
+      let h = ((K[u * 3] * 73856093) ^ (K[u * 3 + 1] * 19349663) ^ (K[u * 3 + 2] * 83492791)) & hmask;
+      while (H[h] >= 0) h = (h + 1) & hmask;
+      H[h] = u;
+    }
+  };
+  const vert = (a, b, c) => {
+    let h = ((a * 73856093) ^ (b * 19349663) ^ (c * 83492791)) & hmask;
+    for (;;) {
+      const u = H[h];
+      if (u < 0) break;
+      if (K[u * 3] === a && K[u * 3 + 1] === b && K[u * 3 + 2] === c) return u;
+      h = (h + 1) & hmask;
+    }
+    K = grow(K, (nu + 1) * 3);
+    K[nu * 3] = a; K[nu * 3 + 1] = b; K[nu * 3 + 2] = c;
+    H[h] = nu;
+    if (++nu * 2 > hsize) rehash();
+    return nu - 1;
+  };
+
+  const groups = [];
+  let objName = '', matName = '', cur = null;
+  const ensureGroup = () => {
+    if (cur && cur.name === objName && cur.mat === matName) return;
+    cur = groups.find(g => g.name === objName && g.mat === matName);
+    if (!cur) { cur = { name: objName, mat: matName, idx: new Uint32Array(3 << 12), ni: 0 }; groups.push(cur); }
+  };
+
+  let p = 0, c;
+  const sp = () => { while (p < n && (u8[p] === 32 || u8[p] === 9)) p++; };
+  const eol = () => p >= n || u8[p] === 10 || u8[p] === 13 || u8[p] === 35;
+  const num = () => {
+    sp();
+    let s = 1;
+    if (u8[p] === 45) { s = -1; p++; } else if (u8[p] === 43) p++;
+    let v = 0, f = 0, d = 1;
+    while (p < n && (c = u8[p] - 48) >= 0 && c <= 9) { v = v * 10 + c; p++; }
+    if (u8[p] === 46) { p++; while (p < n && (c = u8[p] - 48) >= 0 && c <= 9) { if (d < 1e15) { f = f * 10 + c; d *= 10; } p++; } }
+    v += f / d;
+    if (u8[p] === 101 || u8[p] === 69) {
+      p++; let es = 1, e = 0;
+      if (u8[p] === 45) { es = -1; p++; } else if (u8[p] === 43) p++;
+      while (p < n && (c = u8[p] - 48) >= 0 && c <= 9) { e = e * 10 + c; p++; }
+      v *= Math.pow(10, es * e);
+    }
+    while (p < n && u8[p] > 32 && u8[p] !== 35) p++;   // rest van het getal (bijv. 'nan') overslaan
+    return s * v;
+  };
+  const int = () => {
+    let s = 1, v = 0, any = false;
+    if (u8[p] === 45) { s = -1; p++; }
+    while (p < n && (c = u8[p] - 48) >= 0 && c <= 9) { v = v * 10 + c; p++; any = true; }
+    return any ? s * v : 0;
+  };
+  const restOfLine = () => { sp(); const a = p; while (p < n && u8[p] !== 10 && u8[p] !== 13) p++; return new TextDecoder().decode(u8.subarray(a, p)).trim(); };
+  const nextLine = () => { while (p < n && u8[p] !== 10) p++; p++; };
+
+  while (p < n) {
+    sp();
+    const c0 = u8[p], c1 = u8[p + 1];
+    const ws1 = c1 === 32 || c1 === 9;
+    if (c0 === 118 && ws1) {                       // v
+      p++;
+      V = grow(V, (nv + 1) * 3);
+      V[nv * 3] = num(); V[nv * 3 + 1] = num(); V[nv * 3 + 2] = num();
+      sp();
+      if (!eol()) {                                 // kleuren achter het punt
+        if (!C) C = new Float32Array(V.length);
+        C = grow(C, (nv + 1) * 3);
+        C[nv * 3] = num(); C[nv * 3 + 1] = num(); C[nv * 3 + 2] = num();
+      }
+      nv++;
+    } else if (c0 === 118 && c1 === 116) {          // vt
+      p += 2;
+      VT = grow(VT, (nt + 1) * 2);
+      VT[nt * 2] = num(); VT[nt * 2 + 1] = num();
+      nt++;
+    } else if (c0 === 118 && c1 === 110) {          // vn
+      p += 2;
+      VN = grow(VN, (nn + 1) * 3);
+      VN[nn * 3] = num(); VN[nn * 3 + 1] = num(); VN[nn * 3 + 2] = num();
+      nn++;
+    } else if (c0 === 102 && ws1) {                 // f
+      p++;
+      ensureGroup();
+      let first = -1, prev = -1, k = 0;
+      for (;;) {
+        sp();
+        if (eol()) break;
+        let a = int(), b = 0, d = 0;
+        if (u8[p] === 47) { p++; if (u8[p] !== 47) b = int(); if (u8[p] === 47) { p++; d = int(); } }
+        while (p < n && u8[p] > 32 && u8[p] !== 35) p++;
+        a = a < 0 ? nv + a : a - 1;
+        b = b ? (b < 0 ? nt + b : b - 1) : -1;
+        d = d ? (d < 0 ? nn + d : d - 1) : -1;
+        if (a < 0 || a >= nv) { k = -1; break; }   // kapotte verwijzing: vlak overslaan
+        const id = vert(a, b, d);
+        if (k === 0) first = id;
+        else if (k >= 2) {
+          cur.idx = grow(cur.idx, cur.ni + 3);
+          cur.idx[cur.ni++] = first; cur.idx[cur.ni++] = prev; cur.idx[cur.ni++] = id;
+        }
+        prev = id; k++;
+      }
+    } else if ((c0 === 111 || c0 === 103) && ws1) { // o / g
+      p++; objName = restOfLine();
+    } else if (c0 === 117 && u8[p + 1] === 115 && u8[p + 2] === 101 && u8[p + 3] === 109 && u8[p + 4] === 116 && u8[p + 5] === 108) { // usemtl
+      p += 6; matName = restOfLine();
+    } else if (c0 === 108 && ws1) {                 // l (lijnen): deze lezer doet geen lijnen
+      return null;
+    }
+    nextLine();
+  }
+
+  const used = groups.filter(g => g.ni > 0);
+  if (!used.length) return null;
+
+  // Attributen opbouwen voor een set unieke hoekpunten
+  const hasUV = nt > 0, hasN = nn > 0, hasC = !!C;
+  const build = (list, count) => {
+    const g = new THREE.BufferGeometry();
+    const P = new Float32Array(count * 3), T = hasUV ? new Float32Array(count * 2) : null, N = hasN ? new Float32Array(count * 3) : null, CC = hasC ? new Float32Array(count * 3) : null;
+    for (let i = 0; i < count; i++) {
+      const u = list ? list[i] : i, a = K[u * 3], b = K[u * 3 + 1], d = K[u * 3 + 2];
+      P[i * 3] = V[a * 3]; P[i * 3 + 1] = V[a * 3 + 1]; P[i * 3 + 2] = V[a * 3 + 2];
+      if (T && b >= 0) { T[i * 2] = VT[b * 2]; T[i * 2 + 1] = VT[b * 2 + 1]; }
+      if (N && d >= 0) { N[i * 3] = VN[d * 3]; N[i * 3 + 1] = VN[d * 3 + 1]; N[i * 3 + 2] = VN[d * 3 + 2]; }
+      if (CC) { CC[i * 3] = C[a * 3]; CC[i * 3 + 1] = C[a * 3 + 1]; CC[i * 3 + 2] = C[a * 3 + 2]; }
+    }
+    g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    if (T) g.setAttribute('uv', new THREE.BufferAttribute(T, 2));
+    if (N) g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+    if (CC) g.setAttribute('color', new THREE.BufferAttribute(CC, 3));
+    return g;
+  };
+  const makeMat = name => {
+    let m = null;
+    if (materials && name && materials.materialsInfo && materials.materialsInfo[name]) { try { m = materials.create(name); } catch (e) {} }
+    if (!m) { m = defaultMat.clone(); m.name = name || ''; }
+    if (hasC && 'vertexColors' in m) { m.vertexColors = true; m.needsUpdate = true; }
+    return m;
+  };
+
+  const root = new THREE.Group();
+  const byObj = new Map();
+  if (used.length === 1) {
+    const g = build(null, nu);
+    g.setIndex(new THREE.BufferAttribute(used[0].idx.slice(0, used[0].ni), 1));
+    const mesh = new THREE.Mesh(g, makeMat(used[0].mat));
+    mesh.name = used[0].name || 'Mesh';
+    root.add(mesh);
+  } else {
+    const remap = new Int32Array(nu).fill(-1);
+    for (const gr of used) {
+      const list = [];
+      const I = new Uint32Array(gr.ni);
+      for (let i = 0; i < gr.ni; i++) {
+        const u = gr.idx[i];
+        if (remap[u] < 0) { remap[u] = list.length; list.push(u); }
+        I[i] = remap[u];
+      }
+      for (const u of list) remap[u] = -1;
+      const g = build(list, list.length);
+      g.setIndex(new THREE.BufferAttribute(I, 1));
+      gr.idx = null;
+      const mesh = new THREE.Mesh(g, makeMat(gr.mat));
+      mesh.name = gr.name || 'Mesh';
+      if (!byObj.has(gr.name)) byObj.set(gr.name, []);
+      byObj.get(gr.name).push(mesh);
+    }
+    for (const [name, meshes] of byObj) {
+      if (meshes.length === 1) root.add(meshes[0]);
+      else { const og = new THREE.Group(); og.name = name || 'Object'; meshes.forEach(m => og.add(m)); root.add(og); }
+    }
+  }
+  return root;
+}
+
+// ---------- Grote texturen verkleinen vóór ze naar de grafische chip gaan (scheelt honderden MB op de telefoon) ----------
+const MAX_TEX = 2048;
+function shrinkImage(img) {
+  const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  if (!w || !h || Math.max(w, h) <= MAX_TEX) return img;
+  const s = MAX_TEX / Math.max(w, h);
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(w * s)); cv.height = Math.max(1, Math.round(h * s));
+  cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+  if (typeof img.close === 'function') img.close();   // ImageBitmap meteen vrijgeven
+  return cv;
+}
+{
+  // Eén afbeelding tegelijk: anders staan alle texturen tegelijk op volle grootte in het geheugen
+  const il = THREE.ImageLoader.prototype.load;
+  let queue = Promise.resolve();
+  THREE.ImageLoader.prototype.load = function (url, onLoad, onProgress, onError) {
+    const self = this, mgr = this.manager;
+    if (mgr) mgr.itemStart(url);   // meteen aanmelden, zodat 'alles geladen' niet te vroeg komt
+    const fin = () => setTimeout(() => { if (mgr) mgr.itemEnd(url); }, 0);
+    queue = queue.then(() => new Promise(done => {
+      il.call(self, url,
+        img => { let o = img; try { o = shrinkImage(img); } catch (e) {} try { if (onLoad) onLoad(o); } finally { fin(); setTimeout(done, 0); } },
+        onProgress,
+        err => { try { if (onError) onError(err); } finally { fin(); done(); } });
+    }));
+    return undefined;
+  };
+  const bl = THREE.ImageBitmapLoader.prototype.load;
+  THREE.ImageBitmapLoader.prototype.load = function (url, onLoad, onProgress, onError) {
+    return bl.call(this, url, bmp => { let o = bmp; try { o = shrinkImage(bmp); } catch (e) {} if (onLoad) onLoad(o); }, onProgress, onError);
+  };
+}
+
+// ---------- ZIP zuinig lezen: eerst de inhoudsopgave, dan alleen uitpakken wat nodig is ----------
+function zipList(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let e = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+  if (e < 0) return null;
+  const count = dv.getUint16(e + 10, true);
+  let o = dv.getUint32(e + 16, true);
+  if (count === 0xffff || o === 0xffffffff) return null;   // ZIP64: gewone methode gebruiken
+  const td = new TextDecoder(), out = [];
+  for (let k = 0; k < count; k++) {
+    if (dv.getUint32(o, true) !== 0x02014b50) return null;
+    const method = dv.getUint16(o + 10, true), csize = dv.getUint32(o + 20, true), usize = dv.getUint32(o + 24, true);
+    const nl = dv.getUint16(o + 28, true), xl = dv.getUint16(o + 30, true), cl = dv.getUint16(o + 32, true), lo = dv.getUint32(o + 42, true);
+    if (csize === 0xffffffff || usize === 0xffffffff || lo === 0xffffffff) return null;
+    out.push({ name: td.decode(u8.subarray(o + 46, o + 46 + nl)), method, csize, usize, lo });
+    o += 46 + nl + xl + cl;
+  }
+  return out;
+}
+function zipRead(u8, z) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const start = z.lo + 30 + dv.getUint16(z.lo + 26, true) + dv.getUint16(z.lo + 28, true);
+  const raw = u8.subarray(start, start + z.csize);
+  if (z.method === 0) return raw;
+  if (z.method === 8) return inflateSync(raw, new Uint8Array(z.usize));
+  throw new Error('onbekende ZIP-compressie');
+}
+
 function loadZip(file) {
   busy.style.display = 'flex';
   busy.textContent = 'ZIP uitpakken…';
   file.arrayBuffer().then(buf => {
-    let files;
-    try { files = unzipSync(new Uint8Array(buf)); }
-    catch (e) { throw new Error('ZIP kon niet uitgepakt worden'); }
-    const entries = Object.entries(files).filter(([n, d]) => d.length && !/(^|\/)(__MACOSX|\.)/.test(n));
-    const models = entries.filter(([n]) => MODEL_EXTS.includes(n.split('.').pop().toLowerCase()));
-    if (!models.length) throw new Error('Geen 3D-model in de ZIP gevonden (OBJ, STL, GLB, GLTF, FBX, 3DM of DXF).');
-    // Grootste model kiezen
-    models.sort((a, b) => b[1].length - a[1].length);
-    const [mName, mData] = models[0];
+    const u8 = new Uint8Array(buf);
+    const extOf = n => n.split('.').pop().toLowerCase();
+    const skip = n => /(^|\/)(__MACOSX|\.)/.test(n) || n.endsWith('/');
+    // Voorkeur voor het zuinigste formaat als de ZIP er meerdere heeft (GLB is veel lichter dan OBJ of FBX)
+    const PRIO = ['glb', 'gltf', 'obj', 'fbx', '3dm', 'stl', 'dxf'];
+    let entries, models;
+    const list = zipList(u8);
+    if (list) {
+      const files = list.filter(z => z.usize > 0 && !skip(z.name));
+      models = files.filter(z => MODEL_EXTS.includes(extOf(z.name)));
+      if (!models.length) throw new Error('Geen 3D-model in de ZIP gevonden (OBJ, STL, GLB, GLTF, FBX, 3DM of DXF).');
+      models.sort((a, b) => (PRIO.indexOf(extOf(a.name)) - PRIO.indexOf(extOf(b.name))) || (b.usize - a.usize));
+      const pick = models[0];
+      // alleen het gekozen model + materiaal, afbeeldingen en .bin uitpakken
+      const need = files.filter(z => z === pick || !MODEL_EXTS.includes(extOf(z.name)) && /^(mtl|bin|png|jpe?g|webp|bmp|gif|tga|ktx2)$/.test(extOf(z.name)));
+      entries = need.map(z => [z.name, zipRead(u8, z)]);
+      models = models.map(z => [z.name]);
+      entries.sort((a, b) => (a[0] === pick.name ? -1 : b[0] === pick.name ? 1 : 0));
+    } else {
+      let files;
+      try { files = unzipSync(u8); }
+      catch (e) { throw new Error('ZIP kon niet uitgepakt worden'); }
+      entries = Object.entries(files).filter(([n, d]) => d.length && !skip(n));
+      models = entries.filter(([n]) => MODEL_EXTS.includes(extOf(n)));
+      if (!models.length) throw new Error('Geen 3D-model in de ZIP gevonden (OBJ, STL, GLB, GLTF, FBX, 3DM of DXF).');
+      models.sort((a, b) => (PRIO.indexOf(extOf(a[0])) - PRIO.indexOf(extOf(b[0]))) || (b[1].length - a[1].length));
+      const pickName = models[0][0];
+      entries.sort((a, b) => (a[0] === pickName ? -1 : b[0] === pickName ? 1 : 0));
+    }
+    const [mName, mData] = entries[0];
     trace('ZIP uitpakken: ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)');
     const ext = mName.split('.').pop().toLowerCase();
     const base = n => n.split('/').pop().toLowerCase();
@@ -653,6 +929,7 @@ function loadZip(file) {
     const urlMap = {};
     for (const [n, d] of entries) { if (n === mName) continue; const u = URL.createObjectURL(new Blob([d])); zipUrls.push(u); urlMap[base(n)] = u; }
     const manager = new THREE.LoadingManager();
+    manager.onLoad = () => { setTimeout(() => { zipUrls.forEach(u => URL.revokeObjectURL(u)); zipUrls = []; }, 1000); };   // geheugen vrijgeven
     manager.setURLModifier(url => urlMap[base(decodeURIComponent(url.split('?')[0]))] || url);
     const shortName = mName.split('/').pop();
     busy.textContent = 'Laden…';
@@ -664,14 +941,15 @@ function loadZip(file) {
         mats.preload();
         loader.setMaterials(mats);
       }
-      setModel(loader.parse(strFromU8(mData)), shortName);
+      trace('model uitlezen: ' + shortName);
+      setModel(parseOBJFast(mData, loader.materials, matDefault) || loader.parse(strFromU8(mData)), shortName);
     } else if (ext === 'gltf') {
       new GLTFLoader(manager).parse(strFromU8(mData), '', g => setModel(g.scene, shortName), err => fail('Laden mislukt: ' + err.message));
     } else {
       trace('model uitlezen: ' + shortName);
       parseData(ext, (ext === 'gltf' || ext === 'dxf') ? strFromU8(mData) : mData.buffer.slice(mData.byteOffset, mData.byteOffset + mData.byteLength), shortName);
     }
-    if (models.length > 1) setTimeout(() => alert('De ZIP bevat ' + models.length + ' modellen. Geopend: ' + shortName + ' (de grootste).'), 300);
+    if (models.length > 1) setTimeout(() => alert('De ZIP bevat ' + models.length + ' modellen. Geopend: ' + shortName + '.'), 300);
   }).catch(err => fail('Laden mislukt: ' + (err.message || err)))
     .finally(() => { busy.textContent = 'Laden…'; });
 }
@@ -737,7 +1015,7 @@ function loadFile(file) {
     setTimeout(() => parseData(ext, data, file.name), 30);
   };
   reader.onerror = () => { trace('klaar'); fail('Het bestand kon niet gelezen worden.'); };
-  if (ext === 'obj' || ext === 'gltf' || ext === 'dxf') reader.readAsText(file);
+  if (ext === 'gltf' || ext === 'dxf') reader.readAsText(file);
   else reader.readAsArrayBuffer(file);
 }
 
@@ -746,7 +1024,8 @@ function parseData(ext, data, name) {
   busy.style.display = 'flex';
       try {
         if (ext === 'obj') {
-          setModel(new OBJLoader().parse(data), file.name);
+          const u8 = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+          setModel(parseOBJFast(u8, null, matDefault) || new OBJLoader().parse(new TextDecoder().decode(u8)), file.name);
         } else if (ext === 'stl') {
           const geo = new STLLoader().parse(data);
           geo.computeVertexNormals();

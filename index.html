@@ -101,7 +101,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 024 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 025 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -111,7 +111,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 024 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 025 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -217,7 +217,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
-import { unzipSync, inflateSync, strFromU8 } from 'three/addons/libs/fflate.module.js';
+import { unzipSync, zipSync, inflateSync, strFromU8, strToU8 } from 'three/addons/libs/fflate.module.js';
 import { USDZExporter } from 'three/addons/exporters/USDZExporter.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
@@ -2307,8 +2307,48 @@ async function arSolidMeshes(xf, maxTris) {
 
 // Dikte van de AR-buisjes (straal in meter): 60% dunner dan eerst
 const arTubeR = h => Math.max(0.0004, h * 0.0006);
-// Lijnkleur in AR volgt de knop 🎨 (Std / Zwart / Wit); Fade kan Apple-AR niet laten knipperen → wit
+// Lijnkleur in AR volgt de knop 🎨 (Std / Zwart / Wit / Fade)
 const arLineColor = std => lineCol === 'zwart' ? 0x000000 : (lineCol === 'wit' || lineCol === 'fade') ? 0xffffff : std;
+// Fade in AR: een zwarte en een witte laag buisjes die om beurten verschijnen (animatie)
+const FLASH_SEC = 1;        // seconden per kleur
+let arFlash = [];           // [{ id, first }] : first = zichtbaar in de eerste helft
+function addLineTubes(group, tubes, std) {
+  if (lineCol !== 'fade') {
+    const color = arLineColor(std);
+    group.add(new THREE.Mesh(tubes, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: color === 0xffffff ? 0.6 : 0, roughness: 1, metalness: 0 })));
+    return;
+  }
+  const black = new THREE.Mesh(tubes, new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1, metalness: 0 }));
+  const white = new THREE.Mesh(tubes, new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.6, roughness: 1, metalness: 0 }));
+  group.add(black, white);
+  arFlash.push({ id: black.id, first: true }, { id: white.id, first: false });
+}
+// De USDZ van three.js achteraf voorzien van de knipper-animatie (schaal 1 ↔ bijna 0) en opnieuw inpakken
+function animateUSDZ(data) {
+  if (!arFlash.length) return data;
+  const files = unzipSync(data);
+  let usda = strFromU8(files['model.usda']);
+  const fps = 24, half = Math.round(FLASH_SEC * fps), end = half * 2, e = 0.01;
+  usda = usda.replace('\tupAxis = "Y"\n', `\tupAxis = "Y"\n\tstartTimeCode = 0\n\tendTimeCode = ${end}\n\ttimeCodesPerSecond = ${fps}\n\tframesPerSecond = ${fps}\n`);
+  const on = '(1, 1, 1)', off = '(0.0001, 0.0001, 0.0001)';
+  for (const { id, first } of arFlash) {
+    const a = first ? on : off, b = first ? off : on;
+    const samples = `\tfloat3 xformOp:scale.timeSamples = {\n\t\t0: ${a},\n\t\t${half - e}: ${a},\n\t\t${half}: ${b},\n\t\t${end - e}: ${b},\n\t\t${end}: ${a},\n\t}\n`;
+    const re = new RegExp(`(def Xform "Object_${id}"[\\s\\S]*?)\\tuniform token\\[\\] xformOpOrder = \\["xformOp:transform"\\]`);
+    usda = usda.replace(re, `$1${samples}\tuniform token[] xformOpOrder = ["xformOp:transform", "xformOp:scale"]`);
+  }
+  files['model.usda'] = strToU8(usda);
+  // USDZ: niet comprimeren en elk bestand op 64 bytes uitlijnen; model.usda moet eerst
+  const names = ['model.usda', ...Object.keys(files).filter(n => n !== 'model.usda')];
+  const out = {}; let offset = 0;
+  for (const n of names) {
+    const nameLen = strToU8(n).length;
+    const pad = (64 - ((offset + 30 + nameLen + 4) % 64)) % 64;
+    out[n] = [files[n], { extra: { 12345: new Uint8Array(pad) } }];
+    offset += 30 + nameLen + 4 + pad + files[n].length;
+  }
+  return zipSync(out, { level: 0 });
+}
 async function prepareAR() {
   const token = ++arToken;
   arLink.classList.add('wait');
@@ -2329,6 +2369,7 @@ async function prepareAR() {
     for (let i = 0; i < pos.length; i += 3) { pos[i] = (pos[i] - cx) * sc; pos[i + 1] = (pos[i + 1] - box.min.y) * sc; pos[i + 2] = (pos[i + 2] - cz) * sc; }
     const origTris = idx.length / 3, origLines = Math.round(origTris * 1.5);
     const group = new THREE.Group();
+    arFlash = [];
     let msg;
     if (mode === 'solid') {
       // zelfde omrekening naar meters als hierboven, maar dan per deel met materiaal en textuur
@@ -2351,8 +2392,7 @@ async function prepareAR() {
           await new Promise(res => setTimeout(res, 0));
           if (token !== arToken) return;
         }
-        const color = arLineColor(show.outline ? 0x111111 : 0x7fb2ff);
-        group.add(new THREE.Mesh(linesToTubes(lines, arTubeR(h)), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: color === 0xffffff ? 0.6 : 0, roughness: 1, metalness: 0 })));
+        addLineTubes(group, linesToTubes(lines, arTubeR(h)), show.outline ? 0x111111 : 0x7fb2ff);
         msg += ` Plus ${nf(lines.attributes.position.count / 2)} lijnen.`;
       }
     } else {
@@ -2370,12 +2410,12 @@ async function prepareAR() {
       const nLines = lines.attributes.position.count / 2;
       g.computeVertexNormals();
       group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0, transparent: true, opacity: 0.2 })));
-      const color = arLineColor(mode === 'wire' ? 0x7fb2ff : 0xffffff);
-      group.add(new THREE.Mesh(linesToTubes(lines, arTubeR(h)), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6, roughness: 1, metalness: 0 })));
+      addLineTubes(group, linesToTubes(lines, arTubeR(h)), mode === 'wire' ? 0x7fb2ff : 0xffffff);
       msg = `Origineel ±${nf(origLines)} lijnen → AR ${nf(nLines)} lijnen.`;
     }
     if (token !== arToken) return;
-    const data = await new USDZExporter().parse(group, { quickLookCompatible: true });
+    const data = animateUSDZ(await new USDZExporter().parse(group, { quickLookCompatible: true }));
+    if (arFlash.length) msg += ` Lijnen knipperen zwart/wit (${FLASH_SEC} s per kleur).`;
     if (token !== arToken) return;
     if (arUrl) URL.revokeObjectURL(arUrl);
     arBlob = new Blob([data], { type: 'model/vnd.usdz+zip' });

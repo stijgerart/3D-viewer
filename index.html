@@ -1988,9 +1988,12 @@ async function prepSculptAid() {
     const f = v => (Math.round(v * 1000) / 1000).toString();
     const out = [`# ${currentName || 'model'} — klaar voor SculptAid (3D Viewer)`, `# eenheid: millimeter, hoogte ${f(size.y * sc)} mm, ${total} driehoeken`];
     let vo = 1;
+    list.sort((a, b) => a.name.localeCompare(b.name));   // zelfde groep bij elkaar, één 'g' per groep
+    let lastG = null;
     for (const it of list) {
       const P = it.g.attributes.position.array, N = it.g.attributes.normal.array, T = it.g.attributes.uv ? it.g.attributes.uv.array : null, I = it.g.index.array, n = P.length / 3;
-      out.push('g ' + it.name.replace(/\s+/g, '_'));
+      const gname = it.name.replace(/\s+/g, '_');
+      if (gname !== lastG) { out.push('g ' + gname); lastG = gname; }
       for (let i = 0; i < n; i++) out.push(`v ${f(P[i * 3])} ${f(P[i * 3 + 1])} ${f(P[i * 3 + 2])}`);
       if (T) for (let i = 0; i < n; i++) out.push(`vt ${T[i * 2].toFixed(5)} ${T[i * 2 + 1].toFixed(5)}`);
       for (let i = 0; i < n; i++) out.push(`vn ${N[i * 3].toFixed(4)} ${N[i * 3 + 1].toFixed(4)} ${N[i * 3 + 2].toFixed(4)}`);

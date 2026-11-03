@@ -101,7 +101,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 021 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 022 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -111,7 +111,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 021 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 022 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -1858,7 +1858,7 @@ document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.onclick = () => {
     Object.assign(show, oldShow); applyMode();
     busy.style.display = 'none'; busy.textContent = 'Laden…';
   };
-  const base = (currentName || 'model').replace(/\.[^.]+$/, '') + '-' + countTris(model);
+  const base = (currentName || 'model').replace(/\.[^.]+$/, '');   // precies de naam uit Info
   setTimeout(() => {
     if (fmt === 'obj') {
       let txt;
@@ -2425,7 +2425,7 @@ arBtn.onclick = () => {
   prepareAR();
 };
 document.getElementById('arClose').onclick = () => { arPanel.style.display = 'none'; arToken++; };
-arSave.onclick = () => { if (arBlob && !arSave.classList.contains('wait')) offerFile(arBlob, ((currentName || 'model').replace(/\.[^.]+$/, '')) + '-AR.usdz'); };
+arSave.onclick = () => { if (arBlob && !arSave.classList.contains('wait')) offerFile(arBlob, ((currentName || 'model').replace(/\.[^.]+$/, '')) + '.usdz'); };
 function heightChanged() {
   arHeight.blur();
   markPreset();

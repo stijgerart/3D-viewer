@@ -72,7 +72,7 @@
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
   #arSave.wait{background:#3a3d47;border-color:#3a3d47;color:#aaa;pointer-events:none}
-  #arLock{font-size:15px}
+  #arLock,#arFront{font-size:15px}
   #arLink img{width:1px;height:1px;opacity:0;position:absolute}
   #infoPanel,#colPanel,#decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #decInfo{font-size:17px;font-weight:600}
@@ -104,7 +104,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 026 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 027 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -114,13 +114,14 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 026 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 027 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
   <a id="arSafari" class="saveBig" style="display:none;text-align:center;text-decoration:none;line-height:60px">🧭 Open in Safari voor AR</a>
   <button id="arSave" class="saveBig" style="display:none">📤 Bewaar als AR-bestand</button>
   <button id="arLock" class="on">🔒 Echte maat vast (niet knijpen)</button>
+  <button id="arFront" class="on">👁 Lijnen: alleen voorkant</button>
   <div class="arRow">Hoogte in meters</div>
   <div class="decRow" id="arPresets">
     <button data-h="0.5">0,5</button><button data-h="1">1</button><button data-h="1.5">1,5</button><button data-h="2">2</button><button data-h="3">3</button>
@@ -2354,6 +2355,76 @@ function animateUSDZ(data) {
   }
   return zipSync(out, { level: 0 });
 }
+// ---------- Alleen zichtbare lijnen voor AR: bekeken vanuit de huidige kijkrichting ----------
+let arFrontOn = true;
+try { arFrontOn = localStorage.getItem('arFront') !== '0'; } catch (e) {}
+const depthMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  vertexShader: 'void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'void main(){ float d = gl_FragCoord.z; vec3 e = fract(d * vec3(1.0, 255.0, 65025.0)); e -= e.yzz * vec3(1.0 / 255.0, 1.0 / 255.0, 0.0); gl_FragColor = vec4(e, 1.0); }'
+});
+function visibleLines(lines, g, xf) {
+  // Camera in AR-coördinaten: zelfde beeld als in de viewer
+  camera.updateMatrixWorld();
+  const wbox = new THREE.Box3().setFromBufferAttribute(g.attributes.position).applyMatrix4(xf.clone().invert());
+  const sph = wbox.getBoundingSphere(new THREE.Sphere());
+  const dist = camera.position.distanceTo(sph.center);
+  const cam = camera.clone();
+  cam.near = Math.max(0.01, dist - sph.radius * 1.2); cam.far = dist + sph.radius * 1.2;
+  cam.updateProjectionMatrix();
+  cam.matrixAutoUpdate = false; cam.matrixWorldAutoUpdate = false;
+  cam.matrixWorld.copy(xf).multiply(camera.matrixWorld);
+  cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+  // Dieptebeeld maken
+  const W = 1024, H = Math.max(64, Math.round(1024 / camera.aspect));
+  const rt = new THREE.WebGLRenderTarget(W, H);
+  const sd = new THREE.Scene(); sd.add(new THREE.Mesh(g, depthMat));
+  const oc = renderer.getClearColor(new THREE.Color()), oa = renderer.getClearAlpha();
+  renderer.setClearColor(0xffffff, 1);
+  renderer.setRenderTarget(rt); renderer.clear(); renderer.render(sd, cam); renderer.setRenderTarget(null);
+  renderer.setClearColor(oc, oa);
+  const px = new Uint8Array(W * H * 4);
+  renderer.readRenderTargetPixels(rt, 0, 0, W, H, px);
+  rt.dispose();
+  const n = cam.near, f = cam.far;
+  const lin = zw => (2 * n * f) / ((f + n) - (zw * 2 - 1) * (f - n));   // venster-diepte → afstand
+  const depthAt = (x, y) => { const i = (y * W + x) * 4; return px[i] / 255 + px[i + 1] / 65025 + px[i + 2] / 16581375; };
+  const eps = sph.radius * 0.02;
+  const v = new THREE.Vector3();
+  const seen = p => {
+    v.copy(p).project(cam);
+    if (Math.abs(v.x) > 1 || Math.abs(v.y) > 1 || v.z > 1) return true;      // buiten beeld: laten staan
+    const x = Math.floor((v.x * 0.5 + 0.5) * (W - 1)), y = Math.floor((v.y * 0.5 + 0.5) * (H - 1));
+    let d = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = Math.min(W - 1, Math.max(0, x + dx)), yy = Math.min(H - 1, Math.max(0, y + dy));
+      d = Math.max(d, depthAt(xx, yy));
+    }
+    if (d >= 0.9999) return true;                                              // niets ervoor
+    return lin(v.z * 0.5 + 0.5) <= lin(d) + eps;
+  };
+  const P = lines.attributes.position.array, out = [];
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), q = new THREE.Vector3();
+  for (let i = 0; i < P.length; i += 6) {
+    a.fromArray(P, i); b.fromArray(P, i + 3);
+    let k = 0;
+    for (const t of [0.15, 0.5, 0.85]) if (seen(q.lerpVectors(a, b, t))) k++;
+    if (k >= 2) for (let j = 0; j < 6; j++) out.push(P[i + j]);
+  }
+  const r = new THREE.BufferGeometry();
+  r.setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3));
+  return r;
+}
+const arFront = document.getElementById('arFront');
+function showFront() { arFront.classList.toggle('on', arFrontOn); arFront.textContent = arFrontOn ? '👁 Lijnen: alleen voorkant' : '👁 Lijnen: voor- en achterkant'; }
+arFront.onclick = () => {
+  arFrontOn = !arFrontOn;
+  try { localStorage.setItem('arFront', arFrontOn ? '1' : '0'); } catch (e) {}
+  showFront();
+  if (arPanel.style.display === 'flex') prepareAR();
+};
+showFront();
+
 async function prepareAR() {
   const token = ++arToken;
   arLink.classList.add('wait');
@@ -2376,9 +2447,9 @@ async function prepareAR() {
     const group = new THREE.Group();
     arFlash = [];
     let msg;
+    // zelfde omrekening naar meters als hierboven (wereld → AR)
+    const xf = new THREE.Matrix4().makeScale(sc, sc, sc).multiply(new THREE.Matrix4().makeTranslation(-cx, -box.min.y, -cz));
     if (mode === 'solid') {
-      // zelfde omrekening naar meters als hierboven, maar dan per deel met materiaal en textuur
-      const xf = new THREE.Matrix4().makeScale(sc, sc, sc).multiply(new THREE.Matrix4().makeTranslation(-cx, -box.min.y, -cz));
       const r = await arSolidMeshes(xf, AR_MAX_TRIS);
       if (token !== arToken) return;
       r.meshes.forEach(m => group.add(m));
@@ -2391,6 +2462,7 @@ async function prepareAR() {
         for (let i = 0; i < 7; i++) {
           g = decimateTo(pos, idx, target);
           lines = new THREE.EdgesGeometry(g, angle);
+          if (arFrontOn) lines = visibleLines(lines, g, xf);
           const n = lines.attributes.position.count / 2;
           if (n <= AR_MAX_LINES || target < 300) break;
           target = Math.floor(target * AR_MAX_LINES / n * 0.9);
@@ -2398,7 +2470,7 @@ async function prepareAR() {
           if (token !== arToken) return;
         }
         addLineTubes(group, linesToTubes(lines, arTubeR(h)), show.outline ? 0x111111 : 0x7fb2ff);
-        msg += ` Plus ${nf(lines.attributes.position.count / 2)} lijnen.`;
+        msg += ` Plus ${nf(lines.attributes.position.count / 2)} lijnen${arFrontOn ? ' (alleen voorkant)' : ''}.`;
       }
     } else {
       const angle = mode === 'outline' ? 30 : Math.max(1, LINE_ANGLES[parseInt(lineDensity.value, 10)]);
@@ -2406,6 +2478,7 @@ async function prepareAR() {
       for (let i = 0; i < 7; i++) {
         g = decimateTo(pos, idx, target);
         lines = new THREE.EdgesGeometry(g, angle);
+        if (arFrontOn) lines = visibleLines(lines, g, xf);
         const n = lines.attributes.position.count / 2;
         if (n <= AR_MAX_LINES || target < 300) break;
         target = Math.floor(target * AR_MAX_LINES / n * 0.9);
@@ -2416,7 +2489,7 @@ async function prepareAR() {
       g.computeVertexNormals();
       group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0, transparent: true, opacity: 0.2 })));
       addLineTubes(group, linesToTubes(lines, arTubeR(h)), mode === 'wire' ? 0x7fb2ff : 0xffffff);
-      msg = `Origineel ±${nf(origLines)} lijnen → AR ${nf(nLines)} lijnen.`;
+      msg = `Origineel ±${nf(origLines)} lijnen → AR ${nf(nLines)} lijnen${arFrontOn ? ' (alleen voorkant)' : ''}.`;
     }
     if (token !== arToken) return;
     const data = animateUSDZ(await new USDZExporter().parse(group, { quickLookCompatible: true }));
@@ -2450,6 +2523,7 @@ function markPreset() {
 }
 arBtn.onclick = () => {
   arPanel.style.display = 'flex';
+  arFront.style.display = (show.outline || show.wire) ? 'block' : 'none';
   markPreset();
   if (isIOS && isChromeIOS) {
     arLink.style.display = 'none';

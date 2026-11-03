@@ -65,6 +65,9 @@
   #fadeBar{position:fixed;left:12px;right:130px;bottom:calc(env(safe-area-inset-bottom) + 132px);z-index:2;display:none;align-items:center;gap:10px;background:#2e3038ee;border-radius:24px;padding:6px 14px;min-height:44px;box-shadow:0 2px 8px #0006;font-size:14px;white-space:nowrap}
   #fadeBar input{flex:1;min-width:60px;accent-color:#4a7cff}
   body.hideui #fadeBar{opacity:0;pointer-events:none}
+  #spinBar{position:fixed;left:12px;right:150px;bottom:calc(env(safe-area-inset-bottom) + 184px);z-index:2;display:none;align-items:center;gap:10px;background:#2e3038ee;border-radius:24px;padding:6px 14px;min-height:44px;box-shadow:0 2px 8px #0006;font-size:14px;white-space:nowrap}
+  #spinBar input{flex:1;min-width:60px;accent-color:#4a7cff}
+  body.hideui #spinBar{opacity:0;pointer-events:none}
   #arPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #arPanel .arRow{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:16px;font-weight:600}
   #arHeight{width:110px;font-size:18px;padding:10px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#fff;text-align:center}
@@ -107,7 +110,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 029 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 030 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -117,7 +120,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 029 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 030 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -163,6 +166,7 @@
   <div id="saveInfo">Daarna kies je zelf waar het bestand komt: Bestanden, Dropbox, Google Drive…</div>
 </div>
 <video id="camVideo" playsinline muted autoplay></video>
+<div id="spinBar">↻ <input id="spinSpeed" type="range" min="0.5" max="20" step="0.5" value="3"><span id="spinVal">3</span></div>
 <div id="fadeBar">◐ <input id="fadeSpeed" type="range" min="0.25" max="4" step="0.25" value="1"><span id="fadeVal">1 s</span></div>
 <button id="frontFab" aria-label="Precies recht van voren bekijken">⊡ Vooraanzicht</button>
 <button id="centerFab" aria-label="Model in het midden zetten">⌖ Midden</button>
@@ -2103,7 +2107,7 @@ function frontSnap() {
   const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
   const vHalf = THREE.MathUtils.degToRad(camera.fov / 2), hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
   const dist = Math.max(sz.x / 2 / Math.tan(hHalf), sz.y / 2 / Math.tan(vHalf), 1e-3) * 1.08 + sz.z / 2;
-  controls.autoRotate = false; document.getElementById('spin').classList.remove('on');
+  setSpin(false);
   flyTo(c, new THREE.Vector3(c.x, c.y, c.z + dist));
 }
 
@@ -2147,7 +2151,14 @@ document.querySelectorAll('[data-rot]').forEach(b => b.onclick = () => rotateMod
 document.getElementById('mirror').onclick = mirrorModel;
 document.getElementById('resetRot').onclick = () => resetOrientation();
 const spinBtn = document.getElementById('spin');
-spinBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; spinBtn.classList.toggle('on', controls.autoRotate); };
+// Draaien met snelheidsschuifje (toeren per minuut); schuifje alleen zichtbaar als Draai aan staat
+const spinBar = document.getElementById('spinBar'), spinSpeed = document.getElementById('spinSpeed'), spinVal = document.getElementById('spinVal');
+try { const v = parseFloat(localStorage.getItem('spinSpeed')); if (v > 0) controls.autoRotateSpeed = v; } catch (e) {}
+const showSpinVal = () => { spinVal.textContent = String(controls.autoRotateSpeed).replace('.', ',') + ' /min'; };
+spinSpeed.value = controls.autoRotateSpeed; showSpinVal();
+spinSpeed.oninput = () => { controls.autoRotateSpeed = parseFloat(spinSpeed.value); showSpinVal(); try { localStorage.setItem('spinSpeed', controls.autoRotateSpeed); } catch (e) {} };
+function setSpin(on) { controls.autoRotate = on; spinBtn.classList.toggle('on', on); spinBar.style.display = on ? 'flex' : 'none'; }
+spinBtn.onclick = () => setSpin(!controls.autoRotate);
 document.getElementById('file').onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; };
 
 // Slepen en neerzetten (computer)

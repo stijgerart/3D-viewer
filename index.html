@@ -95,6 +95,7 @@
   .itab td{padding:8px 4px;border-bottom:1px solid #383a42;vertical-align:top}
   .itab td:first-child{color:#aab;white-space:nowrap;padding-right:12px}
   .itab td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  #orderReset{font-size:15px;margin-top:4px}
   #nameEdit{width:100%;font-size:16px;padding:8px 10px;border-radius:8px;border:1px solid #555;background:#1e1f24;color:#eee;text-align:right}
   #infoBody{max-height:55vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
   .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
@@ -114,7 +115,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 037 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 038 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -124,7 +125,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" multiple hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 037 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 038 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -142,6 +143,7 @@
 <div id="infoPanel">
   <div class="phead"><strong>Model-info</strong><button id="infoClose">Sluiten</button></div>
   <div id="infoBody"></div>
+  <button id="orderReset">↺ Knopvolgorde herstellen</button>
 </div>
 <div id="colPanel">
   <div class="phead"><strong>Kleur van het model</strong><button id="colClose">Sluiten</button></div>
@@ -682,6 +684,38 @@ const busy = document.getElementById('busy');
 const empty = document.getElementById('empty');
 
 function fail(msg) { busy.style.display = 'none'; trace('klaar'); alert(msg); }
+
+// ---------- Knoppen die je vaak gebruikt schuiven naar links (bij de volgende keer openen) ----------
+(() => {
+  const keyOf = b => b.id || (b.dataset.mode && 'mode:' + b.dataset.mode) || (b.dataset.view && 'view:' + b.dataset.view) || (b.dataset.rot && 'rot:' + b.dataset.rot) || null;
+  let use = {};
+  try { use = JSON.parse(localStorage.getItem('btnUse') || '{}'); } catch (e) {}
+  const rows = [...document.querySelectorAll('#bottom .srow')];
+  // volgorde toepassen: meest gebruikt links; gelijk gebruik → oorspronkelijke volgorde
+  rows.forEach(r => {
+    const btns = [...r.children].filter(b => b.tagName === 'BUTTON');
+    btns.forEach((b, i) => { b.dataset.home = i; });
+    btns.sort((a, b) => ((use[keyOf(b)] || 0) - (use[keyOf(a)] || 0)) || (a.dataset.home - b.dataset.home));
+    btns.forEach(b => r.appendChild(b));
+    r.scrollLeft = 0;
+  });
+  // tellen; oudere klikken tellen langzaam minder mee, zodat de volgorde je huidige gewoontes volgt
+  rows.forEach(r => r.addEventListener('click', e => {
+    const b = e.target.closest('button'); const k = b && keyOf(b);
+    if (!k) return;
+    for (const x in use) use[x] *= 0.995;
+    use[k] = (use[k] || 0) + 1;
+    try { localStorage.setItem('btnUse', JSON.stringify(use)); } catch (err) {}
+  }, true));
+  document.getElementById('orderReset').onclick = () => {
+    use = {};
+    try { localStorage.removeItem('btnUse'); } catch (e) {}
+    rows.forEach(r => {
+      [...r.children].filter(b => b.tagName === 'BUTTON').sort((a, b) => a.dataset.home - b.dataset.home).forEach(b => r.appendChild(b));
+      r.scrollLeft = 0;
+    });
+  };
+})();
 
 // Schuifrijen: vervaging rechts weg als je aan het eind bent
 document.querySelectorAll('.srow').forEach(r => {

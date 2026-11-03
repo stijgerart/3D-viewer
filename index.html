@@ -114,7 +114,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 035 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 036 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -124,7 +124,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" multiple hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 035 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 036 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -249,6 +249,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { unzipSync, zipSync, inflateSync, strFromU8, strToU8 } from 'three/addons/libs/fflate.module.js';
@@ -512,7 +514,26 @@ async function load3dm(buffer) {
 }
 
 // Laat onverwachte fouten zien in plaats van stil te falen
-addEventListener('error', e => fail('Fout: ' + e.message));
+// GLTF-lader die ook gecomprimeerde bestanden aankan (Draco en meshopt, vaak bij verkleinde GLB's)
+let dracoLoader = null;
+function makeGLTFLoader(manager) {
+  const l = new GLTFLoader(manager);
+  if (!dracoLoader) { dracoLoader = new DRACOLoader(); dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/'); }
+  l.setDRACOLoader(dracoLoader);
+  l.setMeshoptDecoder(MeshoptDecoder);
+  return l;
+}
+// Echte foutmelding laten zien (de iPhone verbergt die anders als 'Script error.')
+let lastErrShown = 0;
+function reportError(where, e) {
+  console.error(where, e);
+  const now = performance.now();
+  if (now - lastErrShown < 3000) return;
+  lastErrShown = now;
+  const stack = (e && e.stack ? String(e.stack).split('\n').slice(0, 3).join('\n') : '');
+  fail('Fout bij ' + where + ': ' + (e && e.message || e) + (stack ? '\n\n' + stack : '') + '\n\nStuur dit gerust door.');
+}
+addEventListener('error', e => { if (e.message === 'Script error.' || !e.message) return reportError('onbekend (de browser verbergt de details)', e.error || e.message); fail('Fout: ' + e.message); });
 addEventListener('unhandledrejection', e => fail('Fout: ' + (e.reason && e.reason.message || e.reason)));
 
 const BG = 0x1e1f24;
@@ -994,7 +1015,7 @@ function loadZip(file) {
       trace('model uitlezen: ' + shortName);
       setModel(parseOBJFast(mData, loader.materials, matDefault) || loader.parse(strFromU8(mData)), shortName);
     } else if (ext === 'gltf') {
-      new GLTFLoader(manager).parse(strFromU8(mData), '', g => setModel(g.scene, shortName), err => fail('Laden mislukt: ' + err.message));
+      makeGLTFLoader(manager).parse(strFromU8(mData), '', g => setModel(g.scene, shortName), err => fail('Laden mislukt: ' + err.message));
     } else {
       trace('model uitlezen: ' + shortName);
       parseData(ext, (ext === 'gltf' || ext === 'dxf') ? strFromU8(mData) : mData.buffer.slice(mData.byteOffset, mData.byteOffset + mData.byteLength), shortName);
@@ -1142,7 +1163,7 @@ function parseData(ext, data, name) {
             .catch(err => fail('Laden mislukt: ' + (err.message || err)))
             .finally(() => { busy.textContent = 'Laden…'; });
         } else {
-          new GLTFLoader().parse(data, '', g => setModel(g.scene, file.name), err => fail('Laden mislukt: ' + err.message));
+          makeGLTFLoader().parse(data, '', g => setModel(g.scene, file.name), err => fail('Laden mislukt: ' + err.message));
         }
       } catch (err) {
         trace('klaar');
@@ -2314,13 +2335,14 @@ function applyMode() {
   const showWire = show.wire;
   if (!model) return;
   model.traverse(c => {
-    if (!isM(c)) return;
+    if (!isM(c) || !c.userData.wire || !c.userData.edges) return;
     c.material = mode === 'solid' ? c.userData.orig : matFill;
     c.userData.edges.visible = false;   // outline gaat nu via de silhouetrand
     c.userData.wire.visible = showWire;
     c.userData.wire.material = mode === 'solid' ? matWireBlack : matWire;   // zwart over Solid, blauw los
     // Solid + mesh: vlak iets naar achteren zodat de lijnen er netjes bovenop liggen
     (Array.isArray(c.userData.orig) ? c.userData.orig : [c.userData.orig]).forEach(mt => {
+      if (!mt) return;
       mt.polygonOffset = solidLines; mt.polygonOffsetFactor = 1; mt.polygonOffsetUnits = 1;
     });
   });
@@ -2332,6 +2354,46 @@ function applyMode() {
 const LINE_ANGLES = [0, 1, 3, 6, 10, 15, 20, 26, 33, 41, 50];
 const lineDensity = { value: '0' };   // altijd de volledige mesh
 let shownDensity = -1;
+// Alle mesh-lijnen, zuinig gebouwd: punten op dezelfde plek samen, elke rand één keer
+function fastWireframe(g) {
+  const pos = g.attributes.position, nV = pos.count;
+  const P = new Float32Array(nV * 3);
+  for (let i = 0; i < nV; i++) { P[i * 3] = pos.getX(i); P[i * 3 + 1] = pos.getY(i); P[i * 3 + 2] = pos.getZ(i); }
+  const I = g.index ? g.index.array : null, nI = I ? g.index.count : nV;
+  // punten op dezelfde plek één nummer geven (naden)
+  if (!g.boundingBox) g.computeBoundingBox();
+  const inv = 1 / ((g.boundingBox.getSize(new THREE.Vector3()).length() || 1) * 1e-6);
+  let size = 1; while (size < nV * 2) size <<= 1;
+  const tab = new Int32Array(size).fill(-1), mask = size - 1, id = new Int32Array(nV);
+  for (let i = 0; i < nV; i++) {
+    const x = Math.round(P[i * 3] * inv), y = Math.round(P[i * 3 + 1] * inv), z = Math.round(P[i * 3 + 2] * inv);
+    let h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) & mask;
+    for (;;) {
+      const j = tab[h];
+      if (j < 0) { tab[h] = i; id[i] = i; break; }
+      if (Math.round(P[j * 3] * inv) === x && Math.round(P[j * 3 + 1] * inv) === y && Math.round(P[j * 3 + 2] * inv) === z) { id[i] = j; break; }
+      h = (h + 1) & mask;
+    }
+  }
+  const seen = new Set(), out = new Float32Array(nI * 2 * 3);
+  let k = 0;
+  for (let t = 0; t + 2 < nI; t += 3) {
+    for (let e = 0; e < 3; e++) {
+      const ra = I ? I[t + e] : t + e, rb = I ? I[t + (e + 1) % 3] : t + (e + 1) % 3;
+      if (ra >= nV || rb >= nV) continue;
+      const a = id[ra], b = id[rb];
+      if (a === b) continue;
+      const key = a < b ? a * nV + b : b * nV + a;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out[k++] = P[a * 3]; out[k++] = P[a * 3 + 1]; out[k++] = P[a * 3 + 2];
+      out[k++] = P[b * 3]; out[k++] = P[b * 3 + 1]; out[k++] = P[b * 3 + 2];
+    }
+  }
+  const r = new THREE.BufferGeometry();
+  r.setAttribute('position', new THREE.BufferAttribute(out.slice(0, k), 3));
+  return r;
+}
 function applyLineDensity() {
   const lvl = parseInt(lineDensity.value, 10);
   if (!model || lvl === shownDensity) return;
@@ -2341,10 +2403,10 @@ function applyLineDensity() {
     model.traverse(c => {
       if (!isM(c) || !c.userData.wire) return;
       const cache = c.userData.wireCache || (c.userData.wireCache = {});
-      if (!cache[lvl]) cache[lvl] = lvl === 0
-        ? new THREE.WireframeGeometry(c.geometry)
-        : new THREE.EdgesGeometry(c.geometry, LINE_ANGLES[lvl]);
-      c.userData.wire.geometry = cache[lvl];
+      try {
+        if (!cache[lvl]) cache[lvl] = lvl === 0 ? fastWireframe(c.geometry) : new THREE.EdgesGeometry(c.geometry, LINE_ANGLES[lvl]);
+        c.userData.wire.geometry = cache[lvl];
+      } catch (e) { reportError('mesh-lijnen maken', e); }
     });
     busy.style.display = 'none';
   }, 30);
@@ -3061,10 +3123,12 @@ function syncLineColors(t) {
 }
 
 renderer.setAnimationLoop((t) => {
-  controls.update();
-  syncLineColors(t || performance.now());
-  syncHulls();
-  renderer.render(scene, camera);
+  try {
+    controls.update();
+    syncLineColors(t || performance.now());
+    syncHulls();
+    renderer.render(scene, camera);
+  } catch (e) { reportError('tekenen', e); }
 });
 </script>
 </body>

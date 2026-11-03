@@ -68,6 +68,8 @@
   #arInfo{font-size:15px;line-height:1.4;opacity:.85}
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
+  #arSave.wait{background:#3a3d47;border-color:#3a3d47;color:#aaa;pointer-events:none}
+  #arLock{font-size:15px}
   #arLink img{width:1px;height:1px;opacity:0;position:absolute}
   #infoPanel,#colPanel,#decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #decInfo{font-size:17px;font-weight:600}
@@ -98,7 +100,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 018 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 019 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -108,11 +110,13 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 018 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 019 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
   <a id="arSafari" class="saveBig" style="display:none;text-align:center;text-decoration:none;line-height:60px">🧭 Open in Safari voor AR</a>
+  <button id="arSave" class="saveBig" style="display:none">📤 Bewaar als AR-bestand</button>
+  <button id="arLock" class="on">🔒 Echte maat vast (niet knijpen)</button>
   <div class="arRow">Hoogte in meters</div>
   <div class="decRow" id="arPresets">
     <button data-h="0.5">0,5</button><button data-h="1">1</button><button data-h="1.5">1,5</button><button data-h="2">2</button><button data-h="3">3</button>
@@ -2108,7 +2112,24 @@ const arLink = document.getElementById('arLink');
 const arHeight = document.getElementById('arHeight');
 const canQuickLook = (() => { const a = document.createElement('a'); return !!(a.relList && a.relList.supports && a.relList.supports('ar')); })();
 const nf = n => Math.round(n).toLocaleString('nl-NL');
-let arToken = 0, arUrl = null;
+let arToken = 0, arUrl = null, arBlob = null, arMsg = '';
+const arSave = document.getElementById('arSave');
+const arLock = document.getElementById('arLock');
+let arLockOn = true;
+try { arLockOn = localStorage.getItem('arLock') !== '0'; } catch (e) {}
+// Apple AR: '#allowsContentScaling=0' zet de echte maat vast (knijpen schaalt dan niet)
+function setArHref() { if (arUrl) arLink.href = arUrl + (arLockOn ? '#allowsContentScaling=0' : ''); }
+function arHelp() {
+  return 'Bediening in AR: 1 vinger slepen = verplaatsen, 2 vingers draaien = draaien' + (arLockOn ? ' (maat staat vast)' : ', knijpen = schalen') + ', dubbeltik = terug naar beginstand.';
+}
+function showLock() { arLock.classList.toggle('on', arLockOn); arLock.textContent = arLockOn ? '🔒 Echte maat vast (niet knijpen)' : '🔓 Knijpen om te schalen'; }
+arLock.onclick = () => {
+  arLockOn = !arLockOn;
+  try { localStorage.setItem('arLock', arLockOn ? '1' : '0'); } catch (e) {}
+  showLock(); setArHref();
+  if (arMsg) arInfo.textContent = arMsg + ' ' + arHelp();
+};
+showLock();
 
 // Alle zichtbare delen samenvoegen tot één lijst punten + driehoeken (wereldcoördinaten)
 function collectMesh() {
@@ -2215,10 +2236,68 @@ function linesToTubes(lineGeo, r) {
   return g;
 }
 
+// Zichtbare delen los exporteren met hun eigen materiaal en textuur (in AR-meters)
+const tinyTex = new Map();   // transparante kleur zonder textuur: klein plaatje met alfa (USDZ kent anders geen doorzichtigheid)
+function alphaTexture(col, op) {
+  const key = col.getHexString() + op.toFixed(2);
+  if (tinyTex.has(key)) return tinyTex.get(key);
+  const cv = document.createElement('canvas'); cv.width = cv.height = 4;
+  const x = cv.getContext('2d');
+  x.fillStyle = `rgba(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)},${op})`;
+  x.fillRect(0, 0, 4, 4);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  tinyTex.set(key, t);
+  return t;
+}
+async function arSolidMeshes(xf, maxTris) {
+  mirrorGroup.updateMatrixWorld(true);
+  const list = []; let total = 0;
+  model.traverse(c => {
+    if (!isM(c) || !isShown(c)) return;
+    const g = c.geometry, t = (g.index ? g.index.count : g.attributes.position.count) / 3;
+    list.push({ c, t }); total += t;
+  });
+  const simp = total > maxTris ? await getSimplifier() : null;
+  const override = solidCol ? new THREE.Color().setStyle(solidCol, THREE.SRGBColorSpace) : null;
+  const out = []; let tris = 0;
+  for (const { c, t } of list) {
+    const g = c.geometry;
+    let ng = new THREE.BufferGeometry();
+    for (const k of ['position', 'normal', 'uv']) if (g.attributes[k]) ng.setAttribute(k, plainFloat(g.attributes[k]).clone());
+    if (g.index) ng.setIndex(new THREE.BufferAttribute(new Uint32Array(g.index.array), 1));
+    if (total > maxTris) ng = simplifyGeometry(ng, Math.max(4, t * maxTris / total), simp);
+    if (!ng.index) { const n = ng.attributes.position.count, I = new Uint32Array(n); for (let i = 0; i < n; i++) I[i] = i; ng.setIndex(new THREE.BufferAttribute(I, 1)); }
+    const M = xf.clone().multiply(c.matrixWorld);
+    ng.applyMatrix4(M);
+    if (M.determinant() < 0) { const a = ng.index.array; for (let i = 0; i + 2 < a.length; i += 3) { const q = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = q; } }
+    if (!ng.attributes.normal) ng.computeVertexNormals();
+    const src = (Array.isArray(c.userData.orig) ? c.userData.orig[0] : c.userData.orig) || c.material || matDefault;
+    const ti = texInfo.get(src);
+    const map = !override && texOn ? (src.map || (ti && ti.map) || null) : null;
+    const m = new THREE.MeshStandardMaterial({
+      color: override || (src.color ? src.color.clone() : new THREE.Color(0xcccccc)),
+      roughness: src.roughness !== undefined ? src.roughness : 0.6,
+      metalness: src.metalness !== undefined ? src.metalness : 0
+    });
+    if (map && ng.attributes.uv) { m.map = map; if (src.normalMap) m.normalMap = src.normalMap; }
+    else if (src.transparent && src.opacity < 0.999) {
+      if (!ng.attributes.uv) ng.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(ng.attributes.position.count * 2), 2));
+      m.map = alphaTexture(m.color, src.opacity); m.color.set(0xffffff); m.transparent = true;
+    }
+    out.push(new THREE.Mesh(ng, m));
+    tris += ng.index.count / 3;
+    await new Promise(res => setTimeout(res, 0));
+  }
+  return { meshes: out, tris, total };
+}
+
 async function prepareAR() {
   const token = ++arToken;
   arLink.classList.add('wait');
   arLink.lastChild.textContent = 'Even geduld…';
+  arSave.classList.add('wait');
+  arSave.textContent = 'Even geduld…';
+  arMsg = '';
   arInfo.textContent = 'Model wordt getest en zo nodig verkleind…';
   await new Promise(res => setTimeout(res, 50));
   try {
@@ -2234,11 +2313,30 @@ async function prepareAR() {
     const group = new THREE.Group();
     let msg;
     if (mode === 'solid') {
-      const g = decimateTo(pos, idx, AR_MAX_TRIS);
-      g.computeVertexNormals();
-      group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: solidCol ? new THREE.Color().setStyle(solidCol, THREE.SRGBColorSpace) : 0xcccccc, roughness: 0.6, metalness: 0 })));
-      const n = g.index.count / 3;
-      msg = n < origTris ? `Origineel ${nf(origTris)} driehoeken → AR ${nf(n)}.` : `${nf(n)} driehoeken, past zonder verkleinen.`;
+      // zelfde omrekening naar meters als hierboven, maar dan per deel met materiaal en textuur
+      const xf = new THREE.Matrix4().makeScale(sc, sc, sc).multiply(new THREE.Matrix4().makeTranslation(-cx, -box.min.y, -cz));
+      const r = await arSolidMeshes(xf, AR_MAX_TRIS);
+      if (token !== arToken) return;
+      r.meshes.forEach(m => group.add(m));
+      const hasTex = r.meshes.some(m => m.material.map && !m.material.transparent);
+      msg = (r.tris < origTris ? `Origineel ${nf(origTris)} driehoeken → AR ${nf(r.tris)}.` : `${nf(r.tris)} driehoeken, past zonder verkleinen.`) + (hasTex ? ' Met textuur.' : '');
+      // Outline of Mesh staat ook aan: lijnen als dunne buisjes erbij
+      if (show.outline || show.wire) {
+        const angle = show.outline ? 30 : Math.max(1, LINE_ANGLES[parseInt(lineDensity.value, 10)]);
+        let target = Math.min(origTris, AR_MAX_LINES * 4), g, lines;
+        for (let i = 0; i < 7; i++) {
+          g = decimateTo(pos, idx, target);
+          lines = new THREE.EdgesGeometry(g, angle);
+          const n = lines.attributes.position.count / 2;
+          if (n <= AR_MAX_LINES || target < 300) break;
+          target = Math.floor(target * AR_MAX_LINES / n * 0.9);
+          await new Promise(res => setTimeout(res, 0));
+          if (token !== arToken) return;
+        }
+        const color = show.outline ? 0x111111 : 0x7fb2ff;
+        group.add(new THREE.Mesh(linesToTubes(lines, Math.max(0.001, h * 0.0015)), new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 })));
+        msg += ` Plus ${nf(lines.attributes.position.count / 2)} lijnen.`;
+      }
     } else {
       const angle = mode === 'outline' ? 30 : Math.max(1, LINE_ANGLES[parseInt(lineDensity.value, 10)]);
       let target = Math.min(origTris, AR_MAX_LINES * 4), g, lines;
@@ -2259,17 +2357,22 @@ async function prepareAR() {
       msg = `Origineel ±${nf(origLines)} lijnen → AR ${nf(nLines)} lijnen.`;
     }
     if (token !== arToken) return;
-    const data = await new USDZExporter().parse(group);
+    const data = await new USDZExporter().parse(group, { quickLookCompatible: true });
     if (token !== arToken) return;
     if (arUrl) URL.revokeObjectURL(arUrl);
-    arUrl = URL.createObjectURL(new Blob([data], { type: 'model/vnd.usdz+zip' }));
-    arLink.href = arUrl;
+    arBlob = new Blob([data], { type: 'model/vnd.usdz+zip' });
+    arUrl = URL.createObjectURL(arBlob);
+    setArHref();
     arLink.classList.remove('wait');
     arLink.lastChild.textContent = 'Start AR';
-    arInfo.textContent = msg + ' Knijp om te schalen, sleep om te verplaatsen.';
+    arSave.classList.remove('wait');
+    arSave.textContent = '📤 Bewaar als AR-bestand';
+    arMsg = msg;
+    arInfo.textContent = msg + ' ' + arHelp();
   } catch (e) {
     if (token !== arToken) return;
     arLink.lastChild.textContent = 'Niet gelukt';
+    arSave.textContent = 'Niet gelukt';
     arInfo.textContent = 'AR kon niet worden voorbereid (' + e.message + ').';
   }
 }
@@ -2289,10 +2392,16 @@ arBtn.onclick = () => {
     arLink.style.display = 'none';
     arSafari.style.display = 'block';
     arSafari.href = 'x-safari-' + location.href;
-    arInfo.textContent = 'In Chrome op de iPhone werkt AR niet. Tik op de knop hierboven om de viewer in Safari te openen, laad daar je model en tik op AR.';
+    arSave.style.display = 'block';
+    arLock.style.display = 'none';
+    prepareAR().then(() => {
+      arInfo.textContent = (arMsg ? arMsg + ' ' : '') + 'Chrome kan AR niet zelf openen. Kies: (1) Open in Safari en laad daar je model opnieuw, of (2) Bewaar als AR-bestand → Bewaar in Bestanden, en tik het bestand daarna aan in de app Bestanden: het opent dan direct in AR.';
+    });
     return;
   }
   arSafari.style.display = 'none';
+  arSave.style.display = 'none';
+  arLock.style.display = 'block';
   if (!canQuickLook) {
     arLink.style.display = 'none';
     arInfo.textContent = 'AR werkt alleen op een iPhone of iPad in Safari. In het Claude-venster werkt het niet.';
@@ -2302,10 +2411,11 @@ arBtn.onclick = () => {
   prepareAR();
 };
 document.getElementById('arClose').onclick = () => { arPanel.style.display = 'none'; arToken++; };
+arSave.onclick = () => { if (arBlob && !arSave.classList.contains('wait')) offerFile(arBlob, ((currentName || 'model').replace(/\.[^.]+$/, '')) + '-AR.usdz'); };
 function heightChanged() {
   arHeight.blur();
   markPreset();
-  if (arPanel.style.display === 'flex' && canQuickLook && !(isIOS && isChromeIOS)) prepareAR();
+  if (arPanel.style.display === 'flex' && (canQuickLook || (isIOS && isChromeIOS))) prepareAR();
 }
 document.querySelectorAll('#arPresets button').forEach(b => b.onclick = () => { arHeight.value = b.dataset.h.replace('.', ','); heightChanged(); });
 document.getElementById('arOk').onclick = heightChanged;

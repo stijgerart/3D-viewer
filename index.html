@@ -59,6 +59,9 @@
   #arBtn{display:none;white-space:nowrap}
   #centerFab{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom) + 132px);z-index:2;display:none;border-radius:24px;padding:10px 16px;min-height:44px;font-size:15px;background:#2e3038ee;box-shadow:0 2px 8px #0006;transition:opacity .25s}
   body.hideui #centerFab{opacity:0;pointer-events:none}
+  #frontFab{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom) + 184px);z-index:2;display:none;border-radius:24px;padding:10px 16px;min-height:44px;font-size:15px;background:#2e3038ee;box-shadow:0 2px 8px #0006;transition:opacity .25s}
+  #frontFab.on{background:#4a7cff;border-color:#4a7cff}
+  body.hideui #frontFab{opacity:0;pointer-events:none}
   #fadeBar{position:fixed;left:12px;right:130px;bottom:calc(env(safe-area-inset-bottom) + 132px);z-index:2;display:none;align-items:center;gap:10px;background:#2e3038ee;border-radius:24px;padding:6px 14px;min-height:44px;box-shadow:0 2px 8px #0006;font-size:14px;white-space:nowrap}
   #fadeBar input{flex:1;min-width:60px;accent-color:#4a7cff}
   body.hideui #fadeBar{opacity:0;pointer-events:none}
@@ -104,7 +107,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 028 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 029 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -114,7 +117,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 028 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 029 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -161,6 +164,7 @@
 </div>
 <video id="camVideo" playsinline muted autoplay></video>
 <div id="fadeBar">◐ <input id="fadeSpeed" type="range" min="0.25" max="4" step="0.25" value="1"><span id="fadeVal">1 s</span></div>
+<button id="frontFab" aria-label="Precies recht van voren bekijken">⊡ Vooraanzicht</button>
 <button id="centerFab" aria-label="Model in het midden zetten">⌖ Midden</button>
 <div id="bottom">
   <div class="row srow">
@@ -1022,13 +1026,37 @@ async function loadDrive() {
 document.getElementById('driveBtn').onclick = loadDrive;
 
 let lastFileSize = 0;
+// Afbeelding als plat vlak (rechtop, naar voren), op ware verhouding; maat in pixels
+function loadImagePlane(file) {
+  busy.style.display = 'flex';
+  busy.textContent = 'Afbeelding laden…';
+  trace('afbeelding lezen: ' + file.name);
+  const url = URL.createObjectURL(file);
+  new THREE.TextureLoader().load(url, tex => {
+    URL.revokeObjectURL(url);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const img = tex.image, w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    // maat van het origineel (het plaatje zelf kan verkleind zijn voor het geheugen)
+    const W = file._w || w, H = file._h || h;
+    const geo = new THREE.PlaneGeometry(W, H);
+    const mat = new THREE.MeshStandardMaterial({ map: tex, color: 0xffffff, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = file.name;
+    const root = new THREE.Group(); root.add(mesh);
+    busy.textContent = 'Laden…';
+    setModel(root, file.name);
+    setTimeout(frontSnap, 50);
+  }, undefined, () => { URL.revokeObjectURL(url); busy.textContent = 'Laden…'; fail('Deze afbeelding kon niet geladen worden.'); });
+}
+
 function loadFile(file) {
   sourceName = file.name;
   lastFileSize = file.size || 0;
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'zip') return loadZip(file);
+  if (/^(jpe?g|png|webp|gif|bmp|heic|heif)$/.test(ext) || (/^image\/(jpeg|png|webp|gif|bmp|heic|heif)$/.test(file.type || '') && !MODEL_EXTS.includes(ext))) return loadImagePlane(file);
   if (['ztl', 'zpr', 'zbr'].includes(ext)) return fail('ZBrush-bestanden (.' + ext + ') kunnen niet in een browser geopend worden.\n\nExporteer in ZBrush als FBX (Zplugin > FBX ExportImport) of OBJ en open dat bestand. Bij FBX blijven je subtools als groepen behouden.');
-  if (!['obj', 'stl', 'glb', 'gltf', '3dm', 'fbx', 'dxf'].includes(ext)) return fail('Dit bestandstype wordt niet ondersteund: .' + ext + '\nKies een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand.');
+  if (!['obj', 'stl', 'glb', 'gltf', '3dm', 'fbx', 'dxf'].includes(ext)) return fail('Dit bestandstype wordt niet ondersteund: .' + ext + '\nKies een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP of een afbeelding (JPG/PNG).');
   busy.style.display = 'flex';
   trace('bestand lezen: ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)');
   const reader = new FileReader();
@@ -1890,6 +1918,7 @@ function setModelNow(obj, name) {
   model = obj;
   document.getElementById('arBtn').style.display = 'block';
   document.getElementById('centerFab').style.display = 'block';
+  document.getElementById('frontFab').style.display = 'block';
   document.getElementById('infoBtn').style.display = 'block';
 
   const meshes = [];
@@ -2036,8 +2065,7 @@ function applyLineDensity() {
 }
 
 // Model (alleen zichtbare delen) in het midden van het beeld zetten, passend op het scherm
-function centerModel() {
-  if (!model) return fail('Open eerst een model.');
+function visibleBox() {
   mirrorGroup.updateMatrixWorld(true);
   const box = new THREE.Box3(), tmp = new THREE.Box3();
   model.traverse(c => {
@@ -2049,18 +2077,11 @@ function centerModel() {
     tmp.copy(g.boundingBox).applyMatrix4(c.matrixWorld);
     box.union(tmp);
   });
-  if (box.isEmpty()) return;
-  const center = box.getCenter(new THREE.Vector3());
-  const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3);
-  const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
-  const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
-  const dist = r / Math.sin(Math.min(vHalf, hHalf)) * 1.05;
-  const dir = camera.position.clone().sub(controls.target);
-  if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
-  dir.normalize();
-  // korte, vloeiende beweging
+  return box;
+}
+// Camera vloeiend naar een nieuwe plek
+function flyTo(toT, toP) {
   const fromT = controls.target.clone(), fromP = camera.position.clone();
-  const toT = center, toP = center.clone().addScaledVector(dir, dist);
   const t0 = performance.now(), DUR = 350;
   const step = () => {
     const k = Math.min(1, (performance.now() - t0) / DUR), e = k * (2 - k);
@@ -2071,10 +2092,41 @@ function centerModel() {
   };
   step();
 }
+// ---------- Vooraanzicht: precies recht van voren, zonder perspectief (tele-lens), passend in beeld ----------
+const FOV_NORMAL = 45, FOV_FLAT = 3;
+function setFov(f) { if (camera.fov !== f) { camera.fov = f; camera.updateProjectionMatrix(); } document.getElementById('frontFab').classList.toggle('on', f === FOV_FLAT); }
+function frontSnap() {
+  if (!model) return fail('Open eerst een model.');
+  const box = visibleBox();
+  if (box.isEmpty()) return;
+  setFov(FOV_FLAT);
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+  const vHalf = THREE.MathUtils.degToRad(camera.fov / 2), hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+  const dist = Math.max(sz.x / 2 / Math.tan(hHalf), sz.y / 2 / Math.tan(vHalf), 1e-3) * 1.08 + sz.z / 2;
+  controls.autoRotate = false; document.getElementById('spin').classList.remove('on');
+  flyTo(c, new THREE.Vector3(c.x, c.y, c.z + dist));
+}
+
+function centerModel() {
+  if (!model) return fail('Open eerst een model.');
+  const box = visibleBox();
+  if (box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1e-3);
+  const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
+  const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+  const dist = r / Math.sin(Math.min(vHalf, hHalf)) * 1.05;
+  const dir = camera.position.clone().sub(controls.target);
+  if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
+  dir.normalize();
+  flyTo(center, center.clone().addScaledVector(dir, dist));
+}
 document.getElementById('centerBtn').onclick = centerModel;
 document.getElementById('centerFab').onclick = centerModel;
+document.getElementById('frontFab').onclick = frontSnap;
 
 function setView(v) {
+  setFov(FOV_NORMAL);   // terug naar gewoon perspectief
   // Op een smal (staand) scherm iets verder weg, zodat het object past
   const d = camera.aspect < 1 ? 3.5 / camera.aspect * 0.8 : 3.5;
   const pos = { front: [0, 0, d], side: [d, 0, 0], top: [0, d, 0.001] }[v];

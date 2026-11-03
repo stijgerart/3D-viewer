@@ -101,7 +101,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 022 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 023 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -111,7 +111,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 022 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 023 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -2305,6 +2305,8 @@ async function arSolidMeshes(xf, maxTris) {
   return { meshes: out, tris, total };
 }
 
+// Dikte van de AR-buisjes (straal in meter): 60% dunner dan eerst
+const arTubeR = h => Math.max(0.0004, h * 0.0006);
 async function prepareAR() {
   const token = ++arToken;
   arLink.classList.add('wait');
@@ -2348,7 +2350,7 @@ async function prepareAR() {
           if (token !== arToken) return;
         }
         const color = show.outline ? 0x111111 : 0x7fb2ff;
-        group.add(new THREE.Mesh(linesToTubes(lines, Math.max(0.001, h * 0.0015)), new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 })));
+        group.add(new THREE.Mesh(linesToTubes(lines, arTubeR(h)), new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 })));
         msg += ` Plus ${nf(lines.attributes.position.count / 2)} lijnen.`;
       }
     } else {
@@ -2367,7 +2369,7 @@ async function prepareAR() {
       g.computeVertexNormals();
       group.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6, metalness: 0, transparent: true, opacity: 0.2 })));
       const color = mode === 'wire' ? 0x7fb2ff : 0xffffff;
-      group.add(new THREE.Mesh(linesToTubes(lines, Math.max(0.001, h * 0.0015)), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6, roughness: 1, metalness: 0 })));
+      group.add(new THREE.Mesh(linesToTubes(lines, arTubeR(h)), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6, roughness: 1, metalness: 0 })));
       msg = `Origineel ±${nf(origLines)} lijnen → AR ${nf(nLines)} lijnen.`;
     }
     if (token !== arToken) return;

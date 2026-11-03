@@ -78,9 +78,13 @@
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
   #arSave.wait{background:#3a3d47;border-color:#3a3d47;color:#aaa;pointer-events:none}
-  #arLock,#arFront{font-size:15px}
+  #arLock,#arFront,#prepClean{font-size:15px}
+  #prepPanel .decRow button{flex:1;min-height:50px;font-size:17px}
+  #prepPanel .decRow button.on{background:#4a7cff;border-color:#4a7cff}
+  #prepHeight{flex:1;font-size:20px;padding:10px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#eee}
+  #prepInfo{font-size:14px;opacity:.85;line-height:1.4}
   #arLink img{width:1px;height:1px;opacity:0;position:absolute}
-  #infoPanel,#colPanel,#decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
+  #prepPanel,#infoPanel,#colPanel,#decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #decInfo{font-size:17px;font-weight:600}
   .decRow{display:flex;gap:10px}
   #decNum{flex:1;min-width:0;font-size:20px;padding:12px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#fff}
@@ -110,7 +114,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 031 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 032 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -120,7 +124,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 031 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 032 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -158,9 +162,25 @@
   <button class="saveBig" id="decHalf">½ Halveren</button>
   <div class="decRow"><input id="decNum" type="text" inputmode="numeric" placeholder="aantal driehoeken"><button class="saveBig" id="decApply">Toepassen</button></div>
 </div>
+<div id="prepPanel">
+  <div class="phead"><strong>Klaar voor SculptAid</strong><button id="prepClose">Sluiten</button></div>
+  <div class="arRow">Hoogte op ware maat (meter)</div>
+  <div class="decRow" id="prepH">
+    <button data-v="0.5">0,5</button><button data-v="1">1</button><button data-v="1.5">1,5</button><button data-v="2">2</button><button data-v="3">3</button>
+  </div>
+  <div class="decRow"><input id="prepHeight" type="text" inputmode="decimal" value="1"></div>
+  <div class="arRow">Maximaal aantal driehoeken</div>
+  <div class="decRow" id="prepT">
+    <button data-v="50000">50.000</button><button data-v="100000">100.000</button><button data-v="200000">200.000</button>
+  </div>
+  <button id="prepClean" class="on">🧹 Losse stukjes weghalen</button>
+  <button class="saveBig" id="prepGo">Maken</button>
+  <div id="prepInfo">Zet het model op de vloer met het nulpunt in het midden, op ware maat in millimeters. Zichtbare groepen blijven aparte groepen.</div>
+</div>
 <div id="savePanel">
   <div class="phead"><strong>Opslaan als</strong><button id="saveClose">Sluiten</button></div>
-  <button class="saveBig" data-fmt="obj">OBJ — voor SculptAid</button>
+  <button class="saveBig" id="prepBtn" style="background:#2fa36b;border-color:#2fa36b">🛠 Klaar voor SculptAid</button>
+  <button class="saveBig" data-fmt="obj">OBJ — zoals je het ziet</button>
   <button class="saveBig" data-fmt="glb">GLB — met textures</button>
   <button class="saveBig" id="saveReady" style="display:none;background:#2fa36b;border-color:#2fa36b">📤 Bewaar bestand</button>
   <div id="saveInfo">Daarna kies je zelf waar het bestand komt: Bestanden, Dropbox, Google Drive…</div>
@@ -1849,12 +1869,163 @@ document.getElementById('saveBtn').onclick = () => {
   readyFile = null;
   saveReady.style.display = 'none';
   document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.style.display = 'block');
+  document.getElementById('prepBtn').style.display = 'block';
   savePanel.style.display = 'flex';
 };
+// ---------- Klaar voor SculptAid: op de vloer, nulpunt in het midden, ware maat (mm), opgeruimd, verkleind ----------
+const prepPanel = document.getElementById('prepPanel'), prepHeight = document.getElementById('prepHeight'), prepInfo = document.getElementById('prepInfo');
+const prepState = { h: 1, t: 100000, clean: true };
+try { Object.assign(prepState, JSON.parse(localStorage.getItem('prepState') || '{}')); } catch (e) {}
+function prepShow() {
+  prepHeight.value = String(prepState.h).replace('.', ',');
+  document.querySelectorAll('#prepH button').forEach(b => b.classList.toggle('on', parseFloat(b.dataset.v) === prepState.h));
+  document.querySelectorAll('#prepT button').forEach(b => b.classList.toggle('on', parseInt(b.dataset.v, 10) === prepState.t));
+  const c = document.getElementById('prepClean');
+  c.classList.toggle('on', prepState.clean); c.textContent = prepState.clean ? '🧹 Losse stukjes weghalen' : '🧹 Losse stukjes laten staan';
+  try { localStorage.setItem('prepState', JSON.stringify(prepState)); } catch (e) {}
+}
+document.querySelectorAll('#prepH button').forEach(b => b.onclick = () => { prepState.h = parseFloat(b.dataset.v); prepShow(); });
+document.querySelectorAll('#prepT button').forEach(b => b.onclick = () => { prepState.t = parseInt(b.dataset.v, 10); prepShow(); });
+prepHeight.onchange = () => { const v = parseFloat(String(prepHeight.value).replace(',', '.')); if (v > 0) prepState.h = v; prepShow(); };
+document.getElementById('prepClean').onclick = () => { prepState.clean = !prepState.clean; prepShow(); };
+document.getElementById('prepBtn').onclick = () => { savePanel.style.display = 'none'; prepShow(); prepInfo.textContent = 'Zet het model op de vloer met het nulpunt in het midden, op ware maat in millimeters. Zichtbare groepen blijven aparte groepen.'; prepPanel.style.display = 'flex'; };
+document.getElementById('prepClose').onclick = () => { prepPanel.style.display = 'none'; };
+
+// Losse stukjes: delen die nergens aan vastzitten en heel klein zijn (zoals zwevende brokjes uit Meshy)
+function removeSmallParts(g, modelDiag) {
+  const I = g.index.array, P = g.attributes.position.array, nT = I.length / 3, nV = P.length / 3;
+  const par = new Int32Array(nV); for (let i = 0; i < nV; i++) par[i] = i;
+  const find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+  // punten op dezelfde plek (bijv. bij een textuurnaad) horen bij hetzelfde stuk
+  {
+    const inv = 1 / (modelDiag * 1e-6);
+    let size = 1; while (size < nV * 2) size <<= 1;
+    const tab = new Int32Array(size).fill(-1), mask = size - 1;
+    for (let i = 0; i < nV; i++) {
+      const x = Math.round(P[i * 3] * inv), y = Math.round(P[i * 3 + 1] * inv), z = Math.round(P[i * 3 + 2] * inv);
+      let h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) & mask;
+      for (;;) {
+        const j = tab[h];
+        if (j < 0) { tab[h] = i; break; }
+        if (Math.round(P[j * 3] * inv) === x && Math.round(P[j * 3 + 1] * inv) === y && Math.round(P[j * 3 + 2] * inv) === z) { par[find(i)] = find(j); break; }
+        h = (h + 1) & mask;
+      }
+    }
+  }
+  for (let t = 0; t < nT; t++) { const a = find(I[t * 3]), b = find(I[t * 3 + 1]); par[b] = a; const c = find(I[t * 3 + 2]); par[c] = find(a); }
+  const info = new Map();
+  for (let t = 0; t < nT; t++) {
+    const r = find(I[t * 3]);
+    let o = info.get(r);
+    if (!o) { o = { n: 0, min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }; info.set(r, o); }
+    o.n++;
+    for (let k = 0; k < 3; k++) { const v = I[t * 3 + k] * 3; for (let d = 0; d < 3; d++) { const x = P[v + d]; if (x < o.min[d]) o.min[d] = x; if (x > o.max[d]) o.max[d] = x; } }
+  }
+  let biggest = 0; for (const o of info.values()) biggest = Math.max(biggest, o.n);
+  const drop = new Set();
+  for (const [r, o] of info) {
+    const diag = Math.hypot(o.max[0] - o.min[0], o.max[1] - o.min[1], o.max[2] - o.min[2]);
+    if (o.n < biggest && o.n < Math.max(50, nT * 0.005) && diag < modelDiag * 0.05) drop.add(r);
+  }
+  if (!drop.size) return { g, parts: 0, tris: 0 };
+  const keep = [];
+  let removed = 0;
+  for (let t = 0; t < nT; t++) { if (drop.has(find(I[t * 3]))) { removed++; continue; } keep.push(I[t * 3], I[t * 3 + 1], I[t * 3 + 2]); }
+  g.setIndex(new THREE.BufferAttribute(new Uint32Array(keep), 1));
+  return { g: compactIndexed(g), parts: drop.size, tris: removed };
+}
+
+async function prepSculptAid() {
+  const goBtn = document.getElementById('prepGo');
+  goBtn.disabled = true; goBtn.textContent = 'Bezig…';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    mirrorGroup.updateMatrixWorld(true);
+    // zichtbare delen verzamelen, per groep
+    const partOf = c => { for (let o = c; o; o = o.parent) { const p = parts.find(q => q.obj === o); if (p) return p.name; } return currentName ? currentName.replace(/\.[^.]+$/, '') : 'Model'; };
+    const items = [];
+    model.traverse(c => { if (isM(c) && isShown(c)) items.push(c); });
+    if (!items.length) throw new Error('er zijn geen zichtbare vlakken (alleen lijnen?)');
+    const all = new THREE.Box3();
+    let list = items.map(c => {
+      let g = new THREE.BufferGeometry();
+      for (const k of ['position', 'uv']) if (c.geometry.attributes[k]) g.setAttribute(k, plainFloat(c.geometry.attributes[k]).clone());
+      if (c.geometry.index) g.setIndex(new THREE.BufferAttribute(new Uint32Array(c.geometry.index.array), 1));
+      g.applyMatrix4(c.matrixWorld);
+      if (!g.index) { const n = g.attributes.position.count, I = new Uint32Array(n); for (let i = 0; i < n; i++) I[i] = i; g.setIndex(new THREE.BufferAttribute(I, 1)); }
+      if (c.matrixWorld.determinant() < 0) { const a = g.index.array; for (let i = 0; i + 2 < a.length; i += 3) { const q = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = q; } }
+      g.computeBoundingBox(); all.union(g.boundingBox);
+      return { g, name: partOf(c) };
+    });
+    const diag = all.getSize(new THREE.Vector3()).length() || 1;
+    // aan elkaar koppelen en opruimen
+    let lostParts = 0, lostTris = 0;
+    for (const it of list) {
+      it.g = weldFast(it.g, diag * 1e-6);
+      if (prepState.clean) { const r = removeSmallParts(it.g, diag); it.g = r.g; lostParts += r.parts; lostTris += r.tris; }
+      await new Promise(r => setTimeout(r, 0));
+    }
+    list = list.filter(it => it.g.index.count > 0);
+    // verkleinen
+    const tri = it => it.g.index.count / 3;
+    let total = list.reduce((s, it) => s + tri(it), 0);
+    const orig = total;
+    if (total > prepState.t) {
+      busy.style.display = 'flex'; busy.textContent = 'Verkleinen voor SculptAid…';
+      const simp = await getSimplifier();
+      for (const it of list) { it.g = simplifyGeometry(it.g, Math.max(4, tri(it) * prepState.t / total), simp); await new Promise(r => setTimeout(r, 0)); }
+      total = list.reduce((s, it) => s + tri(it), 0);
+    }
+    // op de vloer, midden op nul, ware maat in mm
+    const box = new THREE.Box3(); list.forEach(it => { it.g.computeBoundingBox(); box.union(it.g.boundingBox); });
+    const size = box.getSize(new THREE.Vector3());
+    const mm = prepState.h * 1000;
+    const sc = mm / (size.y > Math.max(size.x, size.z) * 0.05 ? size.y : Math.max(size.x, size.y, size.z));
+    const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
+    const M = new THREE.Matrix4().makeScale(sc, sc, sc).multiply(new THREE.Matrix4().makeTranslation(-cx, -box.min.y, -cz));
+    list.forEach(it => { it.g.applyMatrix4(M); it.g.computeVertexNormals(); });
+    // OBJ schrijven (groepen als 'g', zoals SculptAid ze leest)
+    const f = v => (Math.round(v * 1000) / 1000).toString();
+    const out = [`# ${currentName || 'model'} — klaar voor SculptAid (3D Viewer)`, `# eenheid: millimeter, hoogte ${f(size.y * sc)} mm, ${total} driehoeken`];
+    let vo = 1;
+    for (const it of list) {
+      const P = it.g.attributes.position.array, N = it.g.attributes.normal.array, T = it.g.attributes.uv ? it.g.attributes.uv.array : null, I = it.g.index.array, n = P.length / 3;
+      out.push('g ' + it.name.replace(/\s+/g, '_'));
+      for (let i = 0; i < n; i++) out.push(`v ${f(P[i * 3])} ${f(P[i * 3 + 1])} ${f(P[i * 3 + 2])}`);
+      if (T) for (let i = 0; i < n; i++) out.push(`vt ${T[i * 2].toFixed(5)} ${T[i * 2 + 1].toFixed(5)}`);
+      for (let i = 0; i < n; i++) out.push(`vn ${N[i * 3].toFixed(4)} ${N[i * 3 + 1].toFixed(4)} ${N[i * 3 + 2].toFixed(4)}`);
+      for (let i = 0; i < I.length; i += 3) {
+        const a = I[i] + vo, b = I[i + 1] + vo, c = I[i + 2] + vo;
+        out.push(T ? `f ${a}/${a}/${a} ${b}/${b}/${b} ${c}/${c}/${c}` : `f ${a}//${a} ${b}//${b} ${c}//${c}`);
+      }
+      vo += n;
+    }
+    const name = (currentName || 'model').replace(/\.[^.]+$/, '') + '.obj';
+    const blob = new Blob([out.join('\n') + '\n'], { type: 'text/plain' });
+    busy.style.display = 'none'; busy.textContent = 'Laden…';
+    const nf2 = n => Math.round(n).toLocaleString('nl-NL');
+    const S = size.clone().multiplyScalar(sc);
+    prepPanel.style.display = 'none';
+    showReady(blob, name);
+    document.getElementById('saveInfo').textContent =
+      `Klaar: ${nf2(total)} driehoeken${total < orig ? ' (was ' + nf2(orig) + ')' : ''}` +
+      (prepState.clean ? `, ${lostParts ? lostParts + ' losse stukjes weggehaald (' + nf2(lostTris) + ' driehoeken)' : 'geen losse stukjes gevonden'}` : '') +
+      `. Maat: ${nf2(S.x)} × ${nf2(S.y)} × ${nf2(S.z)} mm (B × H × D), op de vloer, midden op nul. Kies daarna waar het bestand komt.`;
+  } catch (e) {
+    busy.style.display = 'none'; busy.textContent = 'Laden…';
+    prepInfo.textContent = 'Niet gelukt: ' + (e.message || e);
+  } finally {
+    goBtn.disabled = false; goBtn.textContent = 'Maken';
+  }
+}
+document.getElementById('prepGo').onclick = prepSculptAid;
+document.getElementById('saveBtn').addEventListener('click', () => { document.getElementById('saveInfo').textContent = 'Daarna kies je zelf waar het bestand komt: Bestanden, Dropbox, Google Drive…'; });
+
 // Bestand klaar: tweede tik opent het deelvenster (iPhone vereist een tik)
 function showReady(blob, name) {
   readyFile = { blob, name };
   document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.style.display = 'none');
+  document.getElementById('prepBtn').style.display = 'none';
   saveReady.textContent = '📤 Bewaar ' + name;
   saveReady.style.display = 'block';
   savePanel.style.display = 'flex';

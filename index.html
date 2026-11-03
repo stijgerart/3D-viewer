@@ -69,12 +69,18 @@
   #arLink{display:block;text-align:center;background:#4a7cff;color:#fff;font-weight:700;font-size:20px;padding:18px;border-radius:12px;text-decoration:none}
   #arLink.wait{background:#3a3d47;color:#aaa;pointer-events:none}
   #arLink img{width:1px;height:1px;opacity:0;position:absolute}
-  #colPanel,#decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
+  #infoPanel,#colPanel,#decPanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
   #decInfo{font-size:17px;font-weight:600}
   .decRow{display:flex;gap:10px}
   #decNum{flex:1;min-width:0;font-size:20px;padding:12px;border-radius:10px;border:1px solid #555;background:#1e1f24;color:#fff}
   .decRow .saveBig{flex:none;padding:0 18px}
   #savePanel{position:fixed;left:0;right:0;bottom:0;display:none;flex-direction:column;gap:14px;background:#26282f;border-top:1px solid #444;border-radius:14px 14px 0 0;z-index:5;padding:14px 12px calc(env(safe-area-inset-bottom) + 16px)}
+  #infoBtn{display:none;white-space:nowrap}
+  .itab{width:100%;border-collapse:collapse;font-size:15px}
+  .itab td{padding:8px 4px;border-bottom:1px solid #383a42;vertical-align:top}
+  .itab td:first-child{color:#aab;white-space:nowrap;padding-right:12px}
+  .itab td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  #infoBody{max-height:55vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
   .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   .sw{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:none;padding:4px 0;min-height:0;font-size:13px;color:#ddd}
   .sw i{display:block;width:52px;height:52px;border-radius:50%;border:2px solid #555;box-shadow:inset 0 -6px 10px #0003}
@@ -92,16 +98,17 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 017 · 2 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 018 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
+  <button id="infoBtn">ℹ Info</button>
   <button id="partsBtn">☰ Groepen</button>
   <button id="camBtn">📷 Camera</button>
   <button id="arBtn">🧍 AR</button>
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 017 · 2 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 018 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -112,6 +119,10 @@
   </div>
   <div class="decRow"><input id="arHeight" type="text" inputmode="decimal" value="1"><button class="saveBig" id="arOk">OK</button></div>
   <div id="arInfo"></div>
+</div>
+<div id="infoPanel">
+  <div class="phead"><strong>Model-info</strong><button id="infoClose">Sluiten</button></div>
+  <div id="infoBody"></div>
 </div>
 <div id="colPanel">
   <div class="phead"><strong>Kleur van het model</strong><button id="colClose">Sluiten</button></div>
@@ -1000,8 +1011,10 @@ async function loadDrive() {
 }
 document.getElementById('driveBtn').onclick = loadDrive;
 
+let lastFileSize = 0;
 function loadFile(file) {
   sourceName = file.name;
+  lastFileSize = file.size || 0;
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'zip') return loadZip(file);
   if (['ztl', 'zpr', 'zbr'].includes(ext)) return fail('ZBrush-bestanden (.' + ext + ') kunnen niet in een browser geopend worden.\n\nExporteer in ZBrush als FBX (Zplugin > FBX ExportImport) of OBJ en open dat bestand. Bij FBX blijven je subtools als groepen behouden.');
@@ -1104,6 +1117,22 @@ function weldFast(g, eps) {
   out.setIndex(new THREE.BufferAttribute(I, 1));
   return out;
 }
+// Ongebruikte hoekpunten weggooien na verkleinen (scheelt geheugen)
+function compactIndexed(g) {
+  const I = g.index.array, n = g.attributes.position.count;
+  const map = new Int32Array(n).fill(-1), NI = new Uint32Array(I.length);
+  let k = 0;
+  for (let i = 0; i < I.length; i++) { const v = I[i]; if (map[v] < 0) map[v] = k++; NI[i] = map[v]; }
+  if (k === n) return g;
+  const out = new THREE.BufferGeometry();
+  for (const [name, a] of Object.entries(g.attributes)) {
+    const sz = a.itemSize, src = a.array, dst = new Float32Array(k * sz);
+    for (let v = 0; v < n; v++) { const t = map[v]; if (t >= 0) for (let c = 0; c < sz; c++) dst[t * sz + c] = src[v * sz + c]; }
+    out.setAttribute(name, new THREE.BufferAttribute(dst, sz));
+  }
+  out.setIndex(new THREE.BufferAttribute(NI, 1));
+  return out;
+}
 function simplifyGeometry(geo, targetTris, simp) {
   let g = new THREE.BufferGeometry();
   for (const k of ['position', 'uv', 'color']) if (geo.attributes[k]) g.setAttribute(k, plainFloat(geo.attributes[k]));
@@ -1117,6 +1146,7 @@ function simplifyGeometry(geo, targetTris, simp) {
   if (simp) {
     out = simp.simplify(idx, g.attributes.position.array, 3, target, 1, [])[0];
     g.setIndex(new THREE.BufferAttribute(out, 1));
+    g = compactIndexed(g);
   } else {
     // Reserve: punten samenvoegen (verliest textuur)
     g = decimateTo(g.attributes.position.array, idx, targetTris);
@@ -1543,6 +1573,64 @@ function modelMats() {
   return out;
 }
 function hasTexture() { return modelMats().some(({ mat }) => texInfo.has(mat) || mat.map); }
+// ---------- Model-info ----------
+function showInfo() {
+  if (!model) return fail('Open eerst een model.');
+  mirrorGroup.updateMatrixWorld(true);
+  const nf = n => Math.round(n).toLocaleString('nl-NL');
+  let tris = 0, visTris = 0, verts = 0, meshes = 0, segs = 0, visSegs = 0;
+  const mats = new Set(), texs = new Map(), box = new THREE.Box3(), tmp = new THREE.Box3();
+  model.traverse(c => {
+    const shown = isShown(c);
+    if (isM(c)) {
+      const g = c.geometry, t = (g.index ? g.index.count : g.attributes.position.count) / 3;
+      tris += t; verts += g.attributes.position.count; meshes++;
+      if (shown) visTris += t;
+      (Array.isArray(c.userData.orig || c.material) ? (c.userData.orig || c.material) : [c.userData.orig || c.material]).forEach(m => {
+        if (!m) return;
+        mats.add(m);
+        for (const k of ['map', 'normalMap', 'bumpMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap']) {
+          const tx = m[k] || (k === 'map' && texInfo.get(m) && texInfo.get(m).map);
+          if (tx && tx.image && !texs.has(tx)) texs.set(tx, (tx.image.width || 0) + '×' + (tx.image.height || 0));
+        }
+      });
+    } else if (c.userData.dxfLine && c.isLineSegments2) {
+      const n = c.geometry.attributes.instanceStart ? c.geometry.attributes.instanceStart.count : 0;
+      segs += n; if (shown) visSegs += n;
+    } else return;
+    if (shown && c.geometry) {
+      if (!c.geometry.boundingBox) c.geometry.computeBoundingBox();
+      if (!c.geometry.boundingBox.isEmpty()) { tmp.copy(c.geometry.boundingBox).applyMatrix4(c.matrixWorld); box.union(tmp); }
+    }
+  });
+  const transp = [...mats].filter(m => m.transparent && m.opacity < 1).length;
+  const orig = model.userData.origTris;
+  const rows = [];
+  rows.push(['Bestand', '']);
+  if (tris) {
+    rows.push(['Driehoeken', nf(tris) + (orig && orig > tris ? '<br><small>verkleind van ' + nf(orig) + '</small>' : '')]);
+    if (visTris < tris) rows.push(['Waarvan zichtbaar', nf(visTris)]);
+    rows.push(['Hoekpunten', nf(verts)]);
+  }
+  if (segs) rows.push(['Lijnstukken', nf(segs) + (visSegs < segs ? '<br><small>zichtbaar ' + nf(visSegs) + '</small>' : '')]);
+  if (meshes) rows.push(['Mesh-delen', nf(meshes)]);
+  if (parts.length > 1) rows.push(['Groepen', nf(parts.length) + (parts.some(p => !p.obj.visible) ? '<br><small>' + parts.filter(p => p.obj.visible).length + ' aan</small>' : '')]);
+  if (mats.size) rows.push(['Materialen', nf(mats.size) + (transp ? '<br><small>' + transp + ' transparant</small>' : '')]);
+  rows.push(['Texturen', texs.size ? [...texs.values()].join('<br>') : 'geen']);
+  if (!box.isEmpty()) {
+    const sz = box.getSize(new THREE.Vector3()).divideScalar(model.scale.x || 1);
+    const f = v => (v >= 100 ? Math.round(v) : +v.toPrecision(3)).toLocaleString('nl-NL');
+    rows.push(['Afmetingen<br><small>B × H × D</small>', f(sz.x) + ' × ' + f(sz.y) + ' × ' + f(sz.z) + '<br><small>in eenheden van het bestand</small>']);
+  }
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const fsz = lastFileSize >= 1048576 ? (lastFileSize / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(lastFileSize / 1024)) + ' kB';
+  rows[0][1] = esc(currentName || '') + (lastFileSize ? '<br><small>' + fsz + '</small>' : '');
+  document.getElementById('infoBody').innerHTML = '<table class="itab">' + rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>';
+  document.getElementById('infoPanel').style.display = 'flex';
+}
+document.getElementById('infoBtn').onclick = showInfo;
+document.getElementById('infoClose').onclick = () => { document.getElementById('infoPanel').style.display = 'none'; };
+
 // ---------- Eigen kleur voor het solid model ----------
 let solidCol = null;   // null = originele kleuren
 try { const c = localStorage.getItem('solidCol'); if (c) solidCol = c; } catch (e) {}
@@ -1779,6 +1867,7 @@ function setModelNow(obj, name) {
   model = obj;
   document.getElementById('arBtn').style.display = 'block';
   document.getElementById('centerFab').style.display = 'block';
+  document.getElementById('infoBtn').style.display = 'block';
 
   const meshes = [];
   model.traverse(c => { if (isM(c)) meshes.push(c); });

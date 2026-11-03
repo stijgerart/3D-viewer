@@ -114,7 +114,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 036 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 037 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -124,7 +124,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" multiple hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 036 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 037 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -2188,10 +2188,14 @@ document.querySelectorAll('.saveBig[data-fmt]').forEach(b => b.onclick = () => {
   swapThickLines(true);
   // Hulplijnen tijdelijk weg, originele maat (geen schermschaal)
   model.traverse(c => { if (isM(c)) { c.userData._helpers = [c.userData.edges, c.userData.wire].filter(Boolean); c.userData._helpers.forEach(h => c.remove(h)); } });
+  // interne hulpgegevens niet in het bestand schrijven (GLB neemt 'userData' mee)
+  const savedUD = new Map();
+  model.traverse(c => { savedUD.set(c, c.userData); c.userData = {}; });
   const sc = model.scale.clone(), pos = model.position.clone();
   model.scale.set(1, 1, 1); model.position.set(0, 0, 0);
   model.updateMatrixWorld(true);
   const restore = () => {
+    for (const [c, ud] of savedUD) c.userData = ud;
     model.scale.copy(sc); model.position.copy(pos);
     model.traverse(c => { if (isM(c) && c.userData._helpers) { c.userData._helpers.forEach(h => c.add(h)); delete c.userData._helpers; } });
     swapThickLines(false);
@@ -2229,7 +2233,12 @@ function setModelNow(obj, name) {
   document.getElementById('infoBtn').style.display = 'block';
 
   const meshes = [];
-  model.traverse(c => { if (isM(c)) meshes.push(c); });
+  model.traverse(c => {
+    // oude hulpgegevens die eerder per ongeluk in een GLB zijn opgeslagen: weg ermee
+    if (c.userData) for (const k of ['wire', 'edges', 'wireCache', '_helpers']) delete c.userData[k];
+    if (c.userData && c.userData.orig && !c.userData.orig.isMaterial && !Array.isArray(c.userData.orig)) delete c.userData.orig;
+    if (isM(c)) meshes.push(c);
+  });
 
   let tris = 0;
   for (const m of meshes) {
@@ -2404,7 +2413,7 @@ function applyLineDensity() {
       if (!isM(c) || !c.userData.wire) return;
       const cache = c.userData.wireCache || (c.userData.wireCache = {});
       try {
-        if (!cache[lvl]) cache[lvl] = lvl === 0 ? fastWireframe(c.geometry) : new THREE.EdgesGeometry(c.geometry, LINE_ANGLES[lvl]);
+        if (!cache[lvl] || !cache[lvl].isBufferGeometry) cache[lvl] = lvl === 0 ? fastWireframe(c.geometry) : new THREE.EdgesGeometry(c.geometry, LINE_ANGLES[lvl]);
         c.userData.wire.geometry = cache[lvl];
       } catch (e) { reportError('mesh-lijnen maken', e); }
     });

@@ -82,6 +82,7 @@
   .itab td{padding:8px 4px;border-bottom:1px solid #383a42;vertical-align:top}
   .itab td:first-child{color:#aab;white-space:nowrap;padding-right:12px}
   .itab td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  #nameEdit{width:100%;font-size:16px;padding:8px 10px;border-radius:8px;border:1px solid #555;background:#1e1f24;color:#eee;text-align:right}
   #infoBody{max-height:55vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
   .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
   .sw{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:none;padding:4px 0;min-height:0;font-size:13px;color:#ddd}
@@ -100,7 +101,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 020 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 021 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -110,7 +111,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 020 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF of ZIP bestand te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 021 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -1628,9 +1629,22 @@ function showInfo() {
   }
   const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const fsz = lastFileSize >= 1048576 ? (lastFileSize / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(lastFileSize / 1024)) + ' kB';
-  rows[0][1] = esc(currentName || '') + (lastFileSize ? '<br><small>' + fsz + '</small>' : '');
+  const ext = (/\.[^.]+$/.exec(currentName || '') || [''])[0];
+  const baseName = (currentName || 'model').slice(0, (currentName || 'model').length - ext.length);
+  rows[0][0] = 'Naam<br><small>tik om te wijzigen</small>';
+  rows[0][1] = `<input id="nameEdit" type="text" enterkeyhint="done" autocomplete="off" value="${esc(baseName).replace(/"/g, '&quot;')}"><br><small>${esc(ext)}${lastFileSize ? ' · ' + fsz : ''}</small>`;
   document.getElementById('infoBody').innerHTML = '<table class="itab">' + rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>';
   document.getElementById('infoPanel').style.display = 'flex';
+  const ne = document.getElementById('nameEdit');
+  const apply = () => {
+    const v = ne.value.replace(/[\\/:*?"<>|]/g, '').trim();
+    if (!v) { ne.value = baseName; return; }
+    const old = currentName;
+    currentName = v + ext;
+    if (old && info.textContent.startsWith(old)) info.textContent = currentName + info.textContent.slice(old.length);
+  };
+  ne.onchange = apply;
+  ne.onkeydown = e => { if (e.key === 'Enter') { apply(); ne.blur(); } };
 }
 document.getElementById('infoBtn').onclick = showInfo;
 document.getElementById('infoClose').onclick = () => { document.getElementById('infoPanel').style.display = 'none'; };

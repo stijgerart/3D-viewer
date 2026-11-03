@@ -114,7 +114,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 032 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 033 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -122,9 +122,9 @@
   <button id="camBtn">📷 Camera</button>
   <button id="arBtn">🧍 AR</button>
   <button id="driveBtn">🔗 Drive</button>
-  <label class="btn">📂 Openen<input id="file" type="file" hidden></label>
+  <label class="btn">📂 Openen<input id="file" type="file" multiple hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 032 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 033 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -1051,6 +1051,30 @@ async function loadDrive() {
 document.getElementById('driveBtn').onclick = loadDrive;
 
 let lastFileSize = 0;
+// Meerdere bestanden tegelijk gekozen (bijv. OBJ + MTL + textuur): samen behandelen als één ZIP
+async function loadMulti(files) {
+  busy.style.display = 'flex'; busy.textContent = 'Bestanden samenvoegen…';
+  try {
+    const entries = {};
+    for (const f of files) entries[f.name] = new Uint8Array(await f.arrayBuffer());
+    const main = files.find(f => MODEL_EXTS.includes(f.name.split('.').pop().toLowerCase()));
+    if (!main) throw new Error('Er zit geen 3D-model bij de gekozen bestanden (OBJ, GLB, FBX, STL, 3DM of DXF).');
+    const z = zipSync(entries, { level: 0 });
+    const zf = new File([z], main.name.replace(/\.[^.]+$/, '') + '.zip');
+    loadFile(zf);
+    lastFileSize = files.reduce((t, f) => t + f.size, 0);
+  } catch (e) { fail('Laden mislukt: ' + (e.message || e)); }
+}
+// Losse OBJ die naar een MTL/textuur verwijst: uitleggen hoe die mee kan (eenmalig per sessie)
+let mtlHintShown = false;
+function mtlHint(u8) {
+  if (mtlHintShown) return;
+  const head = new TextDecoder().decode(u8.subarray(0, Math.min(u8.length, 4096)));
+  const m = head.match(/^\s*mtllib\s+(.+)$/m);
+  if (!m) return;
+  mtlHintShown = true;
+  setTimeout(() => alert('Dit OBJ-bestand hoort bij een textuur (' + m[1].trim() + '), maar een browser mag niet zelf in de map kijken.\n\nKies bij 📂 Openen het OBJ, het MTL-bestand en de afbeelding(en) samen: tik in het kiesvenster op "Selecteer" en tik ze alle drie aan. Of zet ze samen in één ZIP.'), 600);
+}
 // Afbeelding als plat vlak (rechtop, naar voren), op ware verhouding; maat in pixels
 function loadImagePlane(file) {
   busy.style.display = 'flex';
@@ -1102,6 +1126,7 @@ function parseData(ext, data, name) {
         if (ext === 'obj') {
           const u8 = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
           setModel(parseOBJFast(u8, null, matDefault) || new OBJLoader().parse(new TextDecoder().decode(u8)), file.name);
+          mtlHint(u8);
         } else if (ext === 'stl') {
           const geo = new STLLoader().parse(data);
           geo.computeVertexNormals();
@@ -2341,7 +2366,7 @@ gridBtn.onclick = () => { gridOn = !gridOn; try { localStorage.setItem('gridOn',
 setTimeout(applyGrid, 0);
 function setSpin(on) { controls.autoRotate = on; spinBtn.classList.toggle('on', on); spinBar.style.display = on ? 'flex' : 'none'; }
 spinBtn.onclick = () => setSpin(!controls.autoRotate);
-document.getElementById('file').onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; };
+document.getElementById('file').onchange = e => { const fs = [...e.target.files]; if (fs.length > 1) loadMulti(fs); else if (fs[0]) loadFile(fs[0]); e.target.value = ''; };
 
 // Slepen en neerzetten (computer)
 const drop = document.getElementById('drop');
@@ -2350,7 +2375,7 @@ addEventListener('dragleave', e => { if (!e.relatedTarget) drop.style.display = 
 addEventListener('drop', e => {
   e.preventDefault();
   drop.style.display = 'none';
-  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  const fs = [...e.dataTransfer.files]; if (fs.length > 1) loadMulti(fs); else if (fs[0]) loadFile(fs[0]);
 });
 
 // Voorkom dat de pagina zelf gaat zoomen op iPhone

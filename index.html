@@ -114,7 +114,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 033 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 034 · 3 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -124,7 +124,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" multiple hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 033 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 034 · 3 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -1572,7 +1572,37 @@ function parseDXF(text, THREE, matFace) {
   return wrap;
 }
 
+// Modellen met een skelet (bijv. rigged/geanimeerd uit Meshy) omzetten naar een gewoon model in de huidige stand,
+// anders kunnen ze niet verkleind, opgeslagen of naar SculptAid gestuurd worden
+function bakeSkinned(obj) {
+  const list = [];
+  obj.traverse(c => { if (c.isSkinnedMesh) list.push(c); });
+  if (!list.length) return 0;
+  obj.updateMatrixWorld(true);
+  const v = new THREE.Vector3();
+  for (const sm of list) {
+    try {
+      if (sm.skeleton) sm.skeleton.update();
+      const g = sm.geometry, pos = g.attributes.position, n = pos.count, out = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { v.fromBufferAttribute(pos, i); sm.applyBoneTransform(i, v); out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z; }
+      const ng = new THREE.BufferGeometry();
+      ng.setAttribute('position', new THREE.BufferAttribute(out, 3));
+      for (const k of ['uv', 'color']) if (g.attributes[k]) ng.setAttribute(k, plainFloat(g.attributes[k]).clone());
+      if (g.index) ng.setIndex(new THREE.BufferAttribute(new Uint32Array(g.index.array), 1));
+      for (const gr of g.groups) ng.addGroup(gr.start, gr.count, gr.materialIndex);
+      ng.computeVertexNormals();
+      const m = new THREE.Mesh(ng, sm.material);
+      m.name = sm.name; m.position.copy(sm.position); m.quaternion.copy(sm.quaternion); m.scale.copy(sm.scale);
+      const par = sm.parent;
+      par.add(m); par.remove(sm);
+      g.dispose();
+    } catch (e) { console.warn('Skelet omzetten mislukt', e); }
+  }
+  return list.length;
+}
 function setModel(obj, name) {
+  const baked = bakeSkinned(obj);
+  if (baked) obj.userData.note = (obj.userData.note || '') + ' · skelet verwijderd';
   const total = countTris(obj);
   if (total <= AUTO_MAX_TRIS) return setModelNow(obj, name);
   busy.style.display = 'flex';
@@ -1580,7 +1610,7 @@ function setModel(obj, name) {
   trace('verkleinen van ' + total.toLocaleString('nl-NL') + ' driehoeken');
   setTimeout(() => {
     decimateObject(obj, AUTO_MAX_TRIS)
-      .then(orig => { obj.userData.origTris = orig; obj.userData.note = ' (verkleind van ' + orig.toLocaleString('nl-NL') + ')'; setModelNow(obj, name); })
+      .then(orig => { obj.userData.origTris = orig; obj.userData.note = ' (verkleind van ' + orig.toLocaleString('nl-NL') + ')' + (obj.userData.note || ''); setModelNow(obj, name); })
       .catch(e => fail('Verkleinen mislukt: ' + (e.message || e)))
       .finally(() => { busy.textContent = 'Laden…'; });
   }, 30);

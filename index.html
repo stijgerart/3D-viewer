@@ -115,7 +115,7 @@
 </style>
 </head>
 <body>
-<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 038 · 3 nov</div></div>
+<div id="splash"><div class="sp-logo">◆</div><div class="sp-title">3D Viewer</div><div class="sp-ver">V 039 · 16 nov</div></div>
 <div id="top">
   <div id="info">Geen bestand geladen</div>
   <button id="infoBtn">ℹ Info</button>
@@ -125,7 +125,7 @@
   <button id="driveBtn">🔗 Drive</button>
   <label class="btn">📂 Openen<input id="file" type="file" multiple hidden></label>
 </div>
-<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 038 · 3 nov</small></div>
+<div id="empty">Tik op “Openen” om een OBJ, STL, GLB, FBX, 3DM, 3MF, DXF, ZIP bestand of een afbeelding te laden, of op “Drive” om een Google Drive-link te plakken.<br><br>1 vinger: draaien · 2 vingers: zoomen, verschuiven en kantelen<br><br><small>V 039 · 16 nov</small></div>
 <div id="arPanel">
   <div class="phead"><strong>AR</strong><button id="arClose">Sluiten</button></div>
   <a id="arLink" rel="ar" href="#" class="wait"><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">Even geduld…</a>
@@ -254,6 +254,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { unzipSync, zipSync, inflateSync, strFromU8, strToU8 } from 'three/addons/libs/fflate.module.js';
 import { USDZExporter } from 'three/addons/exporters/USDZExporter.js';
@@ -735,7 +736,7 @@ function trace(step) { try { localStorage.setItem('viewerStep', step); } catch (
 })();
 
 // ---------- ZIP openen ----------
-const MODEL_EXTS = ['glb', 'gltf', 'fbx', 'obj', '3dm', 'stl', 'dxf'];
+const MODEL_EXTS = ['glb', 'gltf', 'fbx', 'obj', '3dm', '3mf', 'stl', 'dxf'];
 let zipUrls = [];
 // ---------- Snelle OBJ-lezer: leest direct de bytes (geen tekst/regels in het geheugen) en maakt geïndexeerde geometrie ----------
 // Geeft null terug als het bestand iets bevat wat deze lezer niet doet (bijv. lijnen); dan valt de viewer terug op de gewone lezer.
@@ -1000,7 +1001,7 @@ function loadZip(file) {
     const extOf = n => n.split('.').pop().toLowerCase();
     const skip = n => /(^|\/)(__MACOSX|\.)/.test(n) || n.endsWith('/');
     // Voorkeur voor het zuinigste formaat als de ZIP er meerdere heeft (GLB is veel lichter dan OBJ of FBX)
-    const PRIO = ['glb', 'gltf', 'obj', 'fbx', '3dm', 'stl', 'dxf'];
+    const PRIO = ['glb', 'gltf', 'obj', '3mf', 'fbx', '3dm', 'stl', 'dxf'];
     let entries, models;
     const list = zipList(u8);
     if (list) {
@@ -1160,7 +1161,7 @@ function loadFile(file) {
   if (ext === 'zip') return loadZip(file);
   if (/^(jpe?g|png|webp|gif|bmp|heic|heif)$/.test(ext) || (/^image\/(jpeg|png|webp|gif|bmp|heic|heif)$/.test(file.type || '') && !MODEL_EXTS.includes(ext))) return loadImagePlane(file);
   if (['ztl', 'zpr', 'zbr'].includes(ext)) return fail('ZBrush-bestanden (.' + ext + ') kunnen niet in een browser geopend worden.\n\nExporteer in ZBrush als FBX (Zplugin > FBX ExportImport) of OBJ en open dat bestand. Bij FBX blijven je subtools als groepen behouden.');
-  if (!['obj', 'stl', 'glb', 'gltf', '3dm', 'fbx', 'dxf'].includes(ext)) return fail('Dit bestandstype wordt niet ondersteund: .' + ext + '\nKies een OBJ, STL, GLB, FBX, 3DM, DXF, ZIP of een afbeelding (JPG/PNG).');
+  if (!['obj', 'stl', 'glb', 'gltf', '3dm', '3mf', 'fbx', 'dxf'].includes(ext)) return fail('Dit bestandstype wordt niet ondersteund: .' + ext + '\nKies een OBJ, STL, GLB, FBX, 3DM, 3MF, DXF, ZIP of een afbeelding (JPG/PNG).');
   busy.style.display = 'flex';
   trace('bestand lezen: ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)');
   const reader = new FileReader();
@@ -1188,6 +1189,12 @@ function parseData(ext, data, name) {
           setModel(new THREE.Mesh(geo, matDefault.clone()), file.name);
         } else if (ext === 'dxf') {
           setModel(parseDXF(data, THREE, matDefault), file.name);
+        } else if (ext === '3mf') {
+          // 3MF (3D-print formaat): Z omhoog, in millimeters → rechtop zetten
+          const g = new ThreeMFLoader().parse(data);
+          g.rotation.x = -Math.PI / 2;
+          const wrap = new THREE.Group(); wrap.add(g);
+          setModel(wrap, file.name);
         } else if (ext === 'fbx') {
           setModel(new FBXLoader().parse(data, ''), file.name);
         } else if (ext === '3dm') {
